@@ -1,5 +1,9 @@
 # Free AI API Router
 
+[![CI](https://github.com/Godzilla675/free-ai-api-router/actions/workflows/ci.yml/badge.svg)](https://github.com/Godzilla675/free-ai-api-router/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/Godzilla675/free-ai-api-router/actions/workflows/codeql.yml/badge.svg)](https://github.com/Godzilla675/free-ai-api-router/actions/workflows/codeql.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Local OpenAI-compatible router for free and developer-tier AI providers. It discovers upstream models dynamically, groups equivalent deployments, applies hierarchical rate limits, records usage, and falls back safely when a selected model exists on multiple providers.
 
 ## What It Supports
@@ -40,9 +44,9 @@ Replace `dev-token-change-me` and `dev-admin-change-me` in `config.json` before 
 Call it with any OpenAI SDK/client:
 
 ```bash
-curl http://127.0.0.1:8080/v1/chat/completions ^
-  -H "Authorization: Bearer dev-token-change-me" ^
-  -H "Content-Type: application/json" ^
+curl http://127.0.0.1:8080/v1/chat/completions \
+  -H "Authorization: Bearer dev-token-change-me" \
+  -H "Content-Type: application/json" \
   -d "{\"model\":\"free-coding\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hi\"}]}"
 ```
 
@@ -143,9 +147,26 @@ Default examples use API keys and officially exposed HTTP/server endpoints. The 
 ## Development
 
 ```bash
-npm test
-npm run typecheck
 npm run build
+npm run typecheck
+npm test
+npm run smoke
+npm audit --audit-level=moderate
 ```
 
-The test suite uses fake local providers for deterministic router, provider, rate-limit, and HTTP endpoint behavior.
+The test suite uses fake local providers for deterministic router, provider, rate-limit, and HTTP endpoint behavior. `npm run smoke` starts the built server with a temporary local config and verifies `/health`, auth rejection, and `/v1/models`.
+
+## CI
+
+GitHub Actions runs on pull requests, pushes to `main`, and manual dispatch:
+
+```bash
+npm ci
+npm run build
+npm run typecheck
+npm test
+npm run smoke
+npm audit --audit-level=moderate
+```
+
+CodeQL runs on PRs, pushes to `main`, a weekly schedule, and manual dispatch. Dependabot checks npm and GitHub Actions weekly.

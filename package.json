@@ -4,6 +4,14 @@
   "description": "Local OpenAI-compatible router for free and developer-tier AI providers with dynamic model discovery, rate limiting, fallback, and health tracking.",
   "type": "module",
   "main": "dist/index.js",
+  "homepage": "https://github.com/Godzilla675/free-ai-api-router#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Godzilla675/free-ai-api-router.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Godzilla675/free-ai-api-router/issues"
+  },
   "bin": {
     "free-ai-router": "dist/index.js"
   },
@@ -15,7 +23,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "npm run typecheck"
+    "lint": "npm run typecheck",
+    "smoke": "node scripts/smoke-test.mjs"
   },
   "keywords": [
     "ai",
@@ -36,7 +45,9 @@
     "README.md",
     "config.example.json",
     ".env.example",
-    "docs"
+    "docs",
+    "LICENSE",
+    "SECURITY.md"
   ],
   "dependencies": {},
   "devDependencies": {
