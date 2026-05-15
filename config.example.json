@@ -1,0 +1,114 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8080,
+    "authTokens": ["dev-token-change-me"],
+    "requestTimeoutMs": 120000,
+    "maxBodyBytes": 1048576,
+    "adminToken": "dev-admin-change-me"
+  },
+  "limits": {
+    "global": { "rpm": 120, "tpm": 500000, "maxParallel": 20 },
+    "users": {
+      "default": { "rpm": 60, "tpm": 200000, "maxParallel": 5 }
+    },
+    "providers": {},
+    "models": {},
+    "deployments": {}
+  },
+  "routing": {
+    "strategy": "priority",
+    "maxFallbacks": 3,
+    "healthCooldownMs": 30000,
+    "debugHeaders": false
+  },
+  "storage": {
+    "usageLogPath": "router-state/usage.jsonl"
+  },
+  "providers": [
+    {
+      "id": "groq",
+      "type": "openai-compatible",
+      "baseUrl": "https://api.groq.com/openai/v1",
+      "apiKeyEnv": "GROQ_API_KEY",
+      "modelsPath": "/models",
+      "chatPath": "/chat/completions",
+      "priority": 10,
+      "modelFilter": "free"
+    },
+    {
+      "id": "cerebras",
+      "type": "openai-compatible",
+      "baseUrl": "https://api.cerebras.ai/v1",
+      "apiKeyEnv": "CEREBRAS_API_KEY",
+      "modelsPath": "/models",
+      "chatPath": "/chat/completions",
+      "priority": 20,
+      "modelFilter": "free"
+    },
+    {
+      "id": "openrouter",
+      "type": "openai-compatible",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "apiKeyEnv": "OPENROUTER_API_KEY",
+      "modelsPath": "/models",
+      "chatPath": "/chat/completions",
+      "priority": 30,
+      "modelFilter": "free",
+      "headers": {
+        "HTTP-Referer": "http://localhost:8080",
+        "X-Title": "Free AI API Router"
+      }
+    },
+    {
+      "id": "nvidia",
+      "type": "openai-compatible",
+      "baseUrl": "https://integrate.api.nvidia.com/v1",
+      "apiKeyEnv": "NVIDIA_API_KEY",
+      "modelsPath": "/models",
+      "chatPath": "/chat/completions",
+      "priority": 40,
+      "modelFilter": "free"
+    },
+    {
+      "id": "opencode",
+      "type": "openai-compatible",
+      "baseUrl": "http://127.0.0.1:4096/v1",
+      "apiKeyEnv": "OPENCODE_SERVER_PASSWORD",
+      "modelsPath": "/models",
+      "chatPath": "/chat/completions",
+      "priority": 50,
+      "optional": true,
+      "allowLocal": true
+    },
+    {
+      "id": "iflow",
+      "type": "openai-compatible",
+      "baseUrl": "https://apis.iflow.cn/v1",
+      "apiKeyEnv": "IFLOW_API_KEY",
+      "modelsPath": "/models",
+      "chatPath": "/chat/completions",
+      "priority": 60,
+      "optional": true
+    },
+    {
+      "id": "gemini",
+      "type": "gemini",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "apiKeyEnv": "GEMINI_API_KEY",
+      "priority": 70
+    }
+  ],
+  "models": [
+    {
+      "name": "free-coding",
+      "aliases": ["coding", "auto"],
+      "routes": [
+        { "provider": "groq", "model": "qwen/qwen3-32b" },
+        { "provider": "cerebras", "model": "gpt-oss-120b" },
+        { "provider": "openrouter", "model": "qwen/qwen3-coder:free" },
+        { "provider": "opencode", "model": "auto" }
+      ]
+    }
+  ]
+}

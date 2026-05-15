@@ -1,0 +1,126 @@
+import http from 'node:http';
+import { afterEach, describe, expect, it } from 'vitest';
+import { createModelRegistry } from '../src/model-registry.js';
+import { createServer } from '../src/server.js';
+import type { ProviderAdapter, RouterConfig } from '../src/types.js';
+
+const servers: http.Server[] = [];
+
+async function listen(server: http.Server): Promise<string> {
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('invalid server address');
+  }
+  return `http://127.0.0.1:${address.port}`;
+}
+
+afterEach(async () => {
+  await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))));
+});
+
+describe('HTTP server', () => {
+  it('exposes dynamic OpenAI-compatible models and chat completions', async () => {
+    const provider: ProviderAdapter = {
+      id: 'fake',
+      type: 'fake',
+      priority: 0,
+      async listModels() {
+        return [{ id: 'free-model' }];
+      },
+      async chat(request) {
+        return {
+          response: {
+            id: 'chatcmpl_fake',
+            object: 'chat.completion',
+            created: 1,
+            model: request.model,
+            choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }]
+          }
+        };
+      }
+    };
+    const config = { server: { authTokens: ['secret'], adminToken: 'admin' }, models: [], routing: { strategy: 'priority' } } as unknown as RouterConfig;
+    const registry = createModelRegistry([provider], config);
+    await registry.refresh();
+    const baseUrl = await listen(createServer({ providers: [provider], registry, config }));
+
+    const modelsResponse = await fetch(`${baseUrl}/v1/models`, { headers: { authorization: 'Bearer secret' } });
+    const models = await modelsResponse.json() as { data: Array<{ id: string }> };
+    expect(models.data.map((model) => model.id)).toContain('free-model');
+
+    const chatResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer secret', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'free-model', messages: [{ role: 'user', content: 'hi' }] })
+    });
+    const chat = await chatResponse.json() as { choices: Array<{ message: { content: string } }> };
+
+    expect(chatResponse.status).toBe(200);
+    expect(chat.choices[0]?.message.content).toBe('ok');
+  });
+
+  it('rejects unauthenticated v1 requests', async () => {
+    const config = { server: { authTokens: ['secret'], adminToken: 'admin' }, models: [], routing: { strategy: 'priority' } } as unknown as RouterConfig;
+    const registry = createModelRegistry([], config);
+    const baseUrl = await listen(createServer({ providers: [], registry, config }));
+
+    const response = await fetch(`${baseUrl}/v1/models`);
+
+    expect(response.status).toBe(401);
+  });
+
+  it('returns Retry-After for rate-limited requests', async () => {
+    const provider: ProviderAdapter = {
+      id: 'fake',
+      type: 'fake',
+      priority: 0,
+      async listModels() { return [{ id: 'free-model' }]; },
+      async chat(request) {
+        return {
+          response: {
+            id: 'chatcmpl_fake',
+            object: 'chat.completion',
+            created: 1,
+            model: request.model,
+            choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }]
+          }
+        };
+      }
+    };
+    const config = { server: { authTokens: ['secret'], adminToken: 'admin' }, limits: { users: { default: { rpm: 1, tpm: 1000 } } }, models: [], routing: { strategy: 'priority' } } as unknown as RouterConfig;
+    const registry = createModelRegistry([provider], config);
+    await registry.refresh();
+    const baseUrl = await listen(createServer({ providers: [provider], registry, config }));
+
+    const body = JSON.stringify({ model: 'free-model', messages: [{ role: 'user', content: 'hi' }] });
+    await fetch(`${baseUrl}/v1/chat/completions`, { method: 'POST', headers: { authorization: 'Bearer secret', 'content-type': 'application/json' }, body });
+    const limited = await fetch(`${baseUrl}/v1/chat/completions`, { method: 'POST', headers: { authorization: 'Bearer secret', 'content-type': 'application/json' }, body });
+
+    expect(limited.status).toBe(429);
+    expect(Number(limited.headers.get('retry-after'))).toBeGreaterThan(0);
+  });
+
+  it('rejects malformed chat messages before provider dispatch', async () => {
+    const provider: ProviderAdapter = {
+      id: 'fake',
+      type: 'fake',
+      priority: 0,
+      async listModels() { return [{ id: 'free-model' }]; },
+      async chat() { throw new Error('should not dispatch malformed request'); }
+    };
+    const config = { server: { authTokens: ['secret'], adminToken: 'admin' }, models: [], routing: { strategy: 'priority' } } as unknown as RouterConfig;
+    const registry = createModelRegistry([provider], config);
+    await registry.refresh();
+    const baseUrl = await listen(createServer({ providers: [provider], registry, config }));
+
+    const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer secret', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'free-model', messages: ['bad'] })
+    });
+
+    expect(response.status).toBe(400);
+  });
+});

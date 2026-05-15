@@ -1,0 +1,48 @@
+{
+  "name": "free-ai-api-router",
+  "version": "0.1.0",
+  "description": "Local OpenAI-compatible router for free and developer-tier AI providers with dynamic model discovery, rate limiting, fallback, and health tracking.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "free-ai-router": "dist/index.js"
+  },
+  "scripts": {
+    "clean": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "dev": "tsx src/index.ts --config config.example.json",
+    "start": "node dist/index.js --config config.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "npm run typecheck"
+  },
+  "keywords": [
+    "ai",
+    "llm",
+    "openai",
+    "router",
+    "gemini",
+    "opencode",
+    "openrouter",
+    "nvidia"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "config.example.json",
+    ".env.example",
+    "docs"
+  ],
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.14"
+  }
+}
