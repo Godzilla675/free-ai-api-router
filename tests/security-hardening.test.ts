@@ -75,4 +75,45 @@ describe('security hardening', () => {
       providers: [{ id: 'lan', type: 'openai-compatible', baseUrl: 'https://192.168.1.10/v1', apiKey: 'x', allowLocal: true }]
     })).not.toThrow();
   });
+
+  it('resolves provider base URLs from environment variables', () => {
+    const previousBaseUrl = process.env.TEST_PROVIDER_BASE_URL;
+    const previousApiKey = process.env.TEST_PROVIDER_API_KEY;
+    process.env.TEST_PROVIDER_BASE_URL = 'https://example.com/v1';
+    process.env.TEST_PROVIDER_API_KEY = 'secret';
+    try {
+      const config = normalizeConfig({
+        server: { authTokens: ['token'], adminToken: 'admin' },
+        providers: [{ id: 'env-provider', type: 'openai-compatible', baseUrlEnv: 'TEST_PROVIDER_BASE_URL', apiKeyEnv: 'TEST_PROVIDER_API_KEY' }]
+      });
+
+      expect(config.providers?.[0]).toMatchObject({ baseUrl: 'https://example.com/v1', apiKey: 'secret' });
+    } finally {
+      restoreEnv('TEST_PROVIDER_BASE_URL', previousBaseUrl);
+      restoreEnv('TEST_PROVIDER_API_KEY', previousApiKey);
+    }
+  });
+
+  it('skips optional providers when required base URL environment variables are missing', () => {
+    const previousApiKey = process.env.TEST_OPTIONAL_PROVIDER_API_KEY;
+    process.env.TEST_OPTIONAL_PROVIDER_API_KEY = 'secret';
+    try {
+      const config = normalizeConfig({
+        server: { authTokens: ['token'], adminToken: 'admin' },
+        providers: [{ id: 'optional-env-provider', type: 'openai-compatible', baseUrlEnv: 'MISSING_TEST_PROVIDER_BASE_URL', apiKeyEnv: 'TEST_OPTIONAL_PROVIDER_API_KEY', optional: true }]
+      });
+
+      expect(config.providers).toEqual([]);
+    } finally {
+      restoreEnv('TEST_OPTIONAL_PROVIDER_API_KEY', previousApiKey);
+    }
+  });
 });
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+  process.env[name] = value;
+}

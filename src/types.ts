@@ -39,6 +39,7 @@ export interface ProviderConfig {
   id: string;
   type: ProviderType;
   baseUrl?: string;
+  baseUrlEnv?: string;
   apiKey?: string;
   apiKeyEnv?: string;
   modelsPath?: string;

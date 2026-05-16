@@ -82,6 +82,50 @@
       "allowLocal": true
     },
     {
+      "id": "huggingface",
+      "type": "openai-compatible",
+      "baseUrl": "https://router.huggingface.co/v1",
+      "apiKeyEnv": "HF_TOKEN",
+      "modelsPath": "/models",
+      "chatPath": "/chat/completions",
+      "priority": 55,
+      "optional": true
+    },
+    {
+      "id": "github-models",
+      "type": "openai-compatible",
+      "baseUrl": "https://models.github.ai",
+      "apiKeyEnv": "GITHUB_TOKEN",
+      "modelsPath": "/catalog/models",
+      "chatPath": "/inference/chat/completions",
+      "priority": 56,
+      "optional": true,
+      "headers": {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2026-03-10"
+      }
+    },
+    {
+      "id": "sambanova",
+      "type": "openai-compatible",
+      "baseUrl": "https://api.sambanova.ai/v1",
+      "apiKeyEnv": "SAMBANOVA_API_KEY",
+      "modelsPath": "/models",
+      "chatPath": "/chat/completions",
+      "priority": 57,
+      "optional": true
+    },
+    {
+      "id": "cloudflare-workers-ai",
+      "type": "openai-compatible",
+      "baseUrlEnv": "CLOUDFLARE_WORKERS_AI_BASE_URL",
+      "apiKeyEnv": "CLOUDFLARE_API_TOKEN",
+      "modelsPath": "/models/search?format=openrouter",
+      "chatPath": "/v1/chat/completions",
+      "priority": 58,
+      "optional": true
+    },
+    {
       "id": "iflow",
       "type": "openai-compatible",
       "baseUrl": "https://apis.iflow.cn/v1",
@@ -107,6 +151,10 @@
         { "provider": "groq", "model": "qwen/qwen3-32b" },
         { "provider": "cerebras", "model": "gpt-oss-120b" },
         { "provider": "openrouter", "model": "qwen/qwen3-coder:free" },
+        { "provider": "huggingface", "model": "openai/gpt-oss-120b" },
+        { "provider": "github-models", "model": "openai/gpt-4.1-mini" },
+        { "provider": "sambanova", "model": "Meta-Llama-3.1-8B-Instruct" },
+        { "provider": "cloudflare-workers-ai", "model": "@cf/meta/llama-3.1-8b-instruct" },
         { "provider": "opencode", "model": "auto" }
       ]
     }

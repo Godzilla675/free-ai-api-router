@@ -12,7 +12,15 @@ export function normalizeConfig(config: RouterConfig): RouterConfig {
   const allProviderIds = new Set((config.providers ?? []).map((provider) => provider.id));
   const providers = (config.providers ?? [])
     .map(resolveProviderSecrets)
-    .filter((provider) => provider.apiKey || provider.type === 'fake' || provider.allowLocal || false);
+    .filter((provider) => {
+      if (provider.type === 'fake') {
+        return true;
+      }
+      if (provider.optional && provider.baseUrlEnv && !provider.baseUrl) {
+        return false;
+      }
+      return provider.apiKey || provider.allowLocal || false;
+    });
   const activeProviderIds = new Set(providers.map((provider) => provider.id));
   const models = (config.models ?? []).map((model) => ({
     ...model,
@@ -59,8 +67,13 @@ export function normalizeConfig(config: RouterConfig): RouterConfig {
 }
 
 function resolveProviderSecrets(provider: ProviderConfig): ProviderConfig {
+  const baseUrl = provider.baseUrl ?? (provider.baseUrlEnv ? process.env[provider.baseUrlEnv] : undefined);
   const apiKey = provider.apiKey ?? (provider.apiKeyEnv ? process.env[provider.apiKeyEnv] : undefined);
-  return apiKey ? { ...provider, apiKey } : { ...provider };
+  return {
+    ...provider,
+    ...(baseUrl ? { baseUrl } : {}),
+    ...(apiKey ? { apiKey } : {})
+  };
 }
 
 function validateConfig(config: RouterConfig): void {

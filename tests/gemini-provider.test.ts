@@ -18,6 +18,41 @@ afterEach(async () => {
 });
 
 describe('Gemini provider', () => {
+  it('follows model list pagination', async () => {
+    const seenUrls: string[] = [];
+    const baseUrl = await fakeServer((request, response) => {
+      seenUrls.push(request.url ?? '');
+      response.setHeader('content-type', 'application/json');
+      if (request.url === '/v1beta/models') {
+        response.end(JSON.stringify({ models: [{ name: 'models/page-one', supportedGenerationMethods: ['generateContent'] }], nextPageToken: 'next' }));
+        return;
+      }
+      response.end(JSON.stringify({ models: [{ name: 'models/page-two', supportedGenerationMethods: ['generateContent'] }] }));
+    });
+    const provider = new GeminiProvider({ id: 'gemini', type: 'gemini', baseUrl, apiKey: 'secret-key' });
+
+    const models = await provider.listModels();
+
+    expect(seenUrls).toEqual(['/v1beta/models', '/v1beta/models?pageToken=next']);
+    expect(models.map((model) => model.id)).toEqual(['models/page-one', 'models/page-two']);
+  });
+
+  it('uses tuned model resource names without adding a models prefix', async () => {
+    let seenUrl = '';
+    const baseUrl = await fakeServer((request, response) => {
+      seenUrl = request.url ?? '';
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }]
+      }));
+    });
+    const provider = new GeminiProvider({ id: 'gemini', type: 'gemini', baseUrl, apiKey: 'secret-key' });
+
+    await provider.chat({ model: 'tunedModels/custom-model', messages: [{ role: 'user', content: 'hi' }] });
+
+    expect(seenUrl).toBe('/v1beta/tunedModels/custom-model:generateContent');
+  });
+
   it('redacts upstream error bodies before throwing', async () => {
     const baseUrl = await fakeServer((request, response) => {
       expect(request.headers['x-goog-api-key']).toBe('secret-key');
@@ -28,6 +63,20 @@ describe('Gemini provider', () => {
 
     await expect(provider.chat({ model: 'gemini-test', messages: [{ role: 'user', content: 'hi' }] })).rejects.toThrow(/\[REDACTED\]/);
     await expect(provider.chat({ model: 'gemini-test', messages: [{ role: 'user', content: 'hi' }] })).rejects.not.toThrow(/secret-key|abc123/);
+  });
+
+  it('preserves upstream retry-after details on rate limits', async () => {
+    const baseUrl = await fakeServer((_request, response) => {
+      response.statusCode = 429;
+      response.setHeader('retry-after', '3');
+      response.end('rate limit exceeded');
+    });
+    const provider = new GeminiProvider({ id: 'gemini', type: 'gemini', baseUrl, apiKey: 'secret-key' });
+
+    await expect(provider.chat({ model: 'gemini-test', messages: [{ role: 'user', content: 'hi' }] })).rejects.toMatchObject({
+      status: 429,
+      details: { retryAfterMs: 3000 }
+    });
   });
 
   it('treats malformed success JSON as retryable bad upstream response', async () => {
@@ -48,5 +97,15 @@ describe('Gemini provider', () => {
     const provider = new GeminiProvider({ id: 'gemini', type: 'gemini', baseUrl, apiKey: 'secret-key' });
 
     await expect(provider.chat({ model: 'gemini-test', messages: [{ role: 'user', content: 'hi' }] })).rejects.toMatchObject({ status: 400, retryable: false });
+  });
+
+  it('does not advertise image input support for the text-only adapter', async () => {
+    const baseUrl = await fakeServer((_request, response) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ models: [{ name: 'models/gemini-test', supportedGenerationMethods: ['generateContent'] }] }));
+    });
+    const provider = new GeminiProvider({ id: 'gemini', type: 'gemini', baseUrl, apiKey: 'secret-key' });
+
+    await expect(provider.listModels()).resolves.toMatchObject([{ id: 'models/gemini-test', inputModalities: ['text'] }]);
   });
 });

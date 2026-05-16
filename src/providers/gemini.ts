@@ -23,17 +23,27 @@ export class GeminiProvider implements ProviderAdapter {
   }
 
   async listModels(): Promise<ModelInfo[]> {
-    const response = await this.fetchJson(`${this.baseUrl}/models`, { method: 'GET' });
-    const models = (response as { models?: Array<Record<string, unknown>> }).models ?? [];
-    return models
-      .filter((model) => Array.isArray(model.supportedGenerationMethods) ? model.supportedGenerationMethods.includes('generateContent') : true)
-      .map((model) => ({
-        id: String(model.name ?? ''),
-        name: typeof model.displayName === 'string' ? model.displayName : String(model.name ?? ''),
-        inputModalities: ['text', 'image'],
-        raw: model
-      }))
-      .filter((model) => model.id.length > 0);
+    const models: ModelInfo[] = [];
+    let pageToken: string | undefined;
+    do {
+      const url = new URL(`${this.baseUrl}/models`);
+      if (pageToken) {
+        url.searchParams.set('pageToken', pageToken);
+      }
+      const response = await this.fetchJson(url.toString(), { method: 'GET' });
+      const page = response as { models?: Array<Record<string, unknown>>; nextPageToken?: string };
+      models.push(...(page.models ?? [])
+        .filter((model) => Array.isArray(model.supportedGenerationMethods) ? model.supportedGenerationMethods.includes('generateContent') : true)
+        .map((model) => ({
+          id: String(model.name ?? ''),
+          name: typeof model.displayName === 'string' ? model.displayName : String(model.name ?? ''),
+          inputModalities: ['text'],
+          raw: model
+        }))
+        .filter((model) => model.id.length > 0));
+      pageToken = typeof page.nextPageToken === 'string' && page.nextPageToken.length > 0 ? page.nextPageToken : undefined;
+    } while (pageToken);
+    return models;
   }
 
   async chat(request: ChatRequest): Promise<ProviderChatResult> {
@@ -41,7 +51,7 @@ export class GeminiProvider implements ProviderAdapter {
       throw new RouterError('Gemini streaming is not enabled in this adapter yet', { status: 400, code: 'streaming_unsupported', retryable: false });
     }
     validateGeminiRequest(request);
-    const geminiModel = request.model.startsWith('models/') ? request.model : `models/${request.model}`;
+    const geminiModel = toGeminiModelResource(request.model);
     const body = toGeminiRequest(request);
     const response = await this.fetchJson(`${this.baseUrl}/${geminiModel}:generateContent`, {
       method: 'POST',
@@ -69,7 +79,7 @@ export class GeminiProvider implements ProviderAdapter {
         }
       });
       if (!response.ok) {
-        throw new RouterError(redactSecrets(await response.text()), { status: response.status, code: 'upstream_error' });
+        throw new RouterError(redactSecrets(await response.text()), { status: response.status, code: 'upstream_error', details: retryAfterDetails(response) });
       }
       try {
         return await response.json();
@@ -88,6 +98,10 @@ export class GeminiProvider implements ProviderAdapter {
       clearTimeout(timeout);
     }
   }
+}
+
+function toGeminiModelResource(model: string): string {
+  return model.startsWith('models/') || model.startsWith('tunedModels/') ? model : `models/${model}`;
 }
 
 function validateGeminiRequest(request: ChatRequest): void {
@@ -168,6 +182,22 @@ function redactSecrets(value: string): string {
     .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
     .replace(/key=([^&\s]+)/gi, 'key=[REDACTED]')
     .replace(/api[_-]?key[=:]\s*[^\s,&}]+/gi, 'api_key=[REDACTED]');
+}
+
+function retryAfterDetails(response: Response): { retryAfterMs: number } | undefined {
+  const retryAfter = response.headers.get('retry-after');
+  if (!retryAfter) {
+    return undefined;
+  }
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds)) {
+    return { retryAfterMs: Math.max(0, seconds * 1000) };
+  }
+  const date = Date.parse(retryAfter);
+  if (Number.isFinite(date)) {
+    return { retryAfterMs: Math.max(0, date - Date.now()) };
+  }
+  return undefined;
 }
 
 function usageTokens(promptTokens?: number, completionTokens?: number, totalTokens?: number) {

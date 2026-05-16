@@ -10,7 +10,7 @@ Local OpenAI-compatible router for free and developer-tier AI providers. It disc
 
 - OpenAI-compatible `/v1/models`, `/v1/chat/completions`, and basic non-streaming `/v1/responses` endpoints.
 - Dynamic model discovery from provider `/models` endpoints instead of hardcoded model lists.
-- OpenAI-compatible providers: Groq, Cerebras, OpenRouter, NVIDIA NIM, OpenCode server, iFlow, LiteLLM, CLIProxyAPI, 9Router, and similar relays.
+- OpenAI-compatible providers: Groq, Cerebras, OpenRouter, NVIDIA NIM, Hugging Face Inference Providers, GitHub Models, SambaNova, Cloudflare Workers AI, OpenCode server, iFlow, LiteLLM, CLIProxyAPI, 9Router, and similar relays.
 - Native Gemini API adapter using `GEMINI_API_KEY`.
 - Priority or weighted routing.
 - Fallback across provider deployments for the same dynamic model ID or configured aliases.
@@ -37,6 +37,12 @@ $env:OPENROUTER_API_KEY = "your_key"
 $env:NVIDIA_API_KEY = "your_key"
 $env:GEMINI_API_KEY = "your_key"
 $env:OPENCODE_SERVER_PASSWORD = "your_local_opencode_server_password"
+$env:HF_TOKEN = "your_huggingface_token"
+$env:GITHUB_TOKEN = "your_github_token_with_models_read"
+$env:SAMBANOVA_API_KEY = "your_key"
+$env:CLOUDFLARE_API_TOKEN = "your_cloudflare_token"
+$env:CLOUDFLARE_WORKERS_AI_BASE_URL = "https://api.cloudflare.com/client/v4/accounts/your_account_id/ai"
+$env:IFLOW_API_KEY = "your_key"
 ```
 
 Replace `dev-token-change-me` and `dev-admin-change-me` in `config.json` before binding to anything except `127.0.0.1`.
@@ -79,6 +85,10 @@ Common free/developer-tier candidates:
 - `NVIDIA_API_KEY`: NVIDIA NIM hosted serverless dev APIs through `https://integrate.api.nvidia.com/v1`.
 - `GEMINI_API_KEY`: Official Gemini API key path.
 - `OPENCODE_SERVER_PASSWORD`: Local OpenCode server or Zen-compatible endpoint if exposed as `/v1`.
+- `HF_TOKEN`: Hugging Face Inference Providers router through `https://router.huggingface.co/v1`; free monthly credits are account-level.
+- `GITHUB_TOKEN`: GitHub Models free public-preview API usage; token needs models access.
+- `SAMBANOVA_API_KEY`: SambaNova Cloud OpenAI-compatible API with documented free/developer tiers.
+- `CLOUDFLARE_API_TOKEN` plus `CLOUDFLARE_WORKERS_AI_BASE_URL`: Cloudflare Workers AI account API base, for example `https://api.cloudflare.com/client/v4/accounts/<account_id>/ai`; Workers AI has a daily free allocation.
 - `IFLOW_API_KEY`: Optional because iFlow CLI/API availability has changed; verify your account endpoint first.
 
 ## Fallback Rules

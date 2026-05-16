@@ -33,7 +33,7 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
   async listModels(): Promise<ModelInfo[]> {
     const response = await this.fetchJson(`${this.baseUrl}${this.modelsPath}`, { method: 'GET' });
     const data = response as { data?: unknown[]; models?: unknown[] };
-    const models = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : [];
+    const models = Array.isArray(response) ? response : Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : [];
     return models
       .map((model) => this.parseModel(model))
       .filter((model): model is ModelInfo => model !== undefined)
@@ -78,20 +78,40 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
     return {
       id,
       name: typeof record.name === 'string' ? record.name : id,
+      ...modelMetadata(record),
       raw: model
     };
   }
 
   private matchesFilter(model: ModelInfo): boolean {
     if (this.modelFilter === 'free') {
-      return /(^|[:/-])free($|[:/-])|free/i.test(model.id) || JSON.stringify(model.raw ?? {}).includes('"0"');
+      const raw = model.raw;
+      if (typeof raw === 'object' && raw !== null && 'pricing' in raw) {
+        const pricing = (raw as { pricing?: unknown }).pricing;
+        if (typeof pricing !== 'object' || pricing === null) {
+          return this.id !== 'openrouter';
+        }
+        const prompt = (pricing as { prompt?: unknown }).prompt;
+        const completion = (pricing as { completion?: unknown }).completion;
+        return isZeroPrice(prompt) && isZeroPrice(completion);
+      }
+      if (model.id.includes(':free') || /(^|[:/-])free($|[:/-])/i.test(model.id)) {
+        return true;
+      }
+      if (typeof raw !== 'object' || raw === null || !('pricing' in raw)) {
+        return this.id !== 'openrouter';
+      }
     }
     return model.id.includes(this.modelFilter ?? '');
   }
 
   private async fetchJson(url: string, init: RequestInit): Promise<unknown> {
     const response = await this.fetchRaw(url, init);
-    return response.json();
+    try {
+      return await response.json();
+    } catch {
+      throw new RouterError(`Invalid upstream JSON from ${this.id}`, { status: 502, code: 'invalid_upstream_response' });
+    }
   }
 
   private async fetchRaw(url: string, init: RequestInit): Promise<Response> {
@@ -109,7 +129,7 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
         }
       });
       if (!response.ok) {
-        throw new RouterError(await errorMessage(response), { status: response.status, code: 'upstream_error' });
+        throw new RouterError(await errorMessage(response), { status: response.status, code: 'upstream_error', details: retryAfterDetails(response) });
       }
       return response;
     } catch (error) {
@@ -128,6 +148,53 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
   private authHeaders(): Record<string, string> {
     return this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {};
   }
+}
+
+function modelMetadata(record: Record<string, unknown>): Pick<ModelInfo, 'contextWindow' | 'inputModalities' | 'outputModalities'> {
+  const architecture = typeof record.architecture === 'object' && record.architecture !== null ? record.architecture as Record<string, unknown> : undefined;
+  return {
+    ...numberField(record.context_window ?? record.context_length ?? limitValue(record.limits, 'max_input_tokens'), 'contextWindow'),
+    ...stringArrayField(architecture?.input_modalities ?? record.supported_input_modalities, 'inputModalities'),
+    ...stringArrayField(architecture?.output_modalities ?? record.supported_output_modalities, 'outputModalities')
+  };
+}
+
+function limitValue(value: unknown, key: string): unknown {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>)[key] : undefined;
+}
+
+function numberField(value: unknown, key: 'contextWindow'): Pick<ModelInfo, 'contextWindow'> {
+  return typeof value === 'number' && Number.isFinite(value) ? { [key]: value } : {};
+}
+
+function stringArrayField(value: unknown, key: 'inputModalities' | 'outputModalities'): Pick<ModelInfo, 'inputModalities' | 'outputModalities'> {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string') ? { [key]: value } : {};
+}
+
+function isZeroPrice(value: unknown): boolean {
+  if (typeof value === 'number') {
+    return value === 0;
+  }
+  if (typeof value === 'string') {
+    return Number(value) === 0;
+  }
+  return false;
+}
+
+function retryAfterDetails(response: Response): { retryAfterMs: number } | undefined {
+  const retryAfter = response.headers.get('retry-after');
+  if (!retryAfter) {
+    return undefined;
+  }
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds)) {
+    return { retryAfterMs: Math.max(0, seconds * 1000) };
+  }
+  const date = Date.parse(retryAfter);
+  if (Number.isFinite(date)) {
+    return { retryAfterMs: Math.max(0, date - Date.now()) };
+  }
+  return undefined;
 }
 
 function usageTokens(promptTokens?: number, completionTokens?: number, totalTokens?: number) {
