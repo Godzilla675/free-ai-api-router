@@ -108,6 +108,23 @@ describe('security hardening', () => {
       restoreEnv('TEST_OPTIONAL_PROVIDER_API_KEY', previousApiKey);
     }
   });
+
+  it('defaults authDir to router-state/auth', () => {
+    const config = normalizeConfig({
+      server: { authTokens: ['token'], adminToken: 'admin' },
+      providers: []
+    });
+
+    expect(config.auth?.authDir).toBe('router-state/auth');
+  });
+
+  it('rejects empty authDir when auth config is present', () => {
+    expect(() => normalizeConfig({
+      server: { authTokens: ['token'], adminToken: 'admin' },
+      auth: { authDir: '   ' },
+      providers: []
+    })).toThrow('auth.authDir must be a non-empty string');
+  });
 });
 
 function restoreEnv(name: string, value: string | undefined): void {

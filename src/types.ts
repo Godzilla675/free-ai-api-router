@@ -69,11 +69,18 @@ export interface ConfiguredModelGroup {
   routes: ConfiguredRoute[];
 }
 
+export interface AuthConfig {
+  authDir?: string;
+  refreshIntervalMs?: number;
+  refreshJitterMs?: number;
+}
+
 export interface RouterConfig {
   server?: ServerConfig;
   limits?: LimitConfig;
   routing?: RoutingConfig;
   storage?: StorageConfig;
+  auth?: AuthConfig;
   providers?: ProviderConfig[];
   models?: ConfiguredModelGroup[];
 }

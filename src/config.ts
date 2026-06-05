@@ -59,6 +59,12 @@ export function normalizeConfig(config: RouterConfig): RouterConfig {
       sessionAffinityMaxEntries: 10_000,
       ...(config.routing ?? {})
     },
+    auth: {
+      authDir: 'router-state/auth',
+      refreshIntervalMs: 60_000,
+      refreshJitterMs: 5_000,
+      ...(config.auth ?? {})
+    },
     limits: config.limits ?? {},
     storage: config.storage ?? {},
     providers,
@@ -80,6 +86,14 @@ function resolveProviderSecrets(provider: ProviderConfig): ProviderConfig {
 }
 
 function validateConfig(config: RouterConfig): void {
+  if (config.auth?.authDir !== undefined && config.auth.authDir.trim().length === 0) {
+    throw new RouterError('auth.authDir must be a non-empty string', {
+      status: 400,
+      code: 'invalid_config',
+      retryable: false
+    });
+  }
+
   const authTokens = config.server?.authTokens ?? [];
   if (authTokens.length === 0 || authTokens.some((token) => token.trim().length === 0)) {
     throw new RouterError('server.authTokens must contain at least one non-empty token', { status: 400, code: 'invalid_config', retryable: false });
