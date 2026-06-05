@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { redactAuthRecord } from '../src/auth/types.js';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { AuthStore } from '../src/auth/store.js';
 
 describe('auth records', () => {
   it('redacts secret material from auth records', () => {
@@ -18,5 +22,30 @@ describe('auth records', () => {
 
     expect(redacted.secrets).toEqual({ accessToken: '[REDACTED]', refreshToken: '[REDACTED]' });
     expect(redacted.attributes).toEqual({ account: 'user@example.com' });
+  });
+});
+
+describe('AuthStore', () => {
+  it('persists and reloads auth records as individual JSON files', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'free-ai-router-auth-'));
+    try {
+      const store = new AuthStore(dir);
+      await store.save({
+        id: 'auth-1',
+        provider: 'codex',
+        status: 'available',
+        disabled: false,
+        createdAt: '2026-06-05T00:00:00.000Z',
+        updatedAt: '2026-06-05T00:00:00.000Z',
+        secrets: { accessToken: 'secret' }
+      });
+
+      const reloaded = await new AuthStore(dir).loadAll();
+      expect(reloaded).toHaveLength(1);
+      expect(reloaded[0]?.id).toBe('auth-1');
+      expect(reloaded[0]?.secrets?.accessToken).toBe('secret');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
