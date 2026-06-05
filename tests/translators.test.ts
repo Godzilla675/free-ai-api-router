@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { normalizeProtocolFormat } from '../src/translators/types.js';
 import { openAIToClaudeRequest } from '../src/translators/openai-to-claude.js';
 import { claudeToOpenAIResponse } from '../src/translators/claude-to-openai.js';
+import { openAIToGeminiRequest } from '../src/translators/openai-to-gemini.js';
+import { geminiToOpenAIResponse } from '../src/translators/gemini-to-openai.js';
 
 describe('translator framework', () => {
   it('normalizes known protocol format names', () => {
@@ -44,5 +46,33 @@ describe('translator framework', () => {
     expect(result.id).toBe('chatcmpl_msg_1');
     expect(result.choices[0]?.message.content).toBe('hi');
     expect(result.usage?.prompt_tokens).toBe(1);
+  });
+
+  it('translates OpenAI chat request to Gemini generateContent request', () => {
+    const result = openAIToGeminiRequest({
+      model: 'gemini-3-pro',
+      messages: [
+        { role: 'system', content: 'be concise' },
+        { role: 'user', content: 'hello' }
+      ],
+      max_tokens: 100
+    });
+
+    expect(result).toEqual({
+      contents: [{ role: 'user', parts: [{ text: 'hello' }] }],
+      systemInstruction: { parts: [{ text: 'be concise' }] },
+      generationConfig: { maxOutputTokens: 100 }
+    });
+  });
+
+  it('translates Gemini text response to OpenAI chat response', () => {
+    const result = geminiToOpenAIResponse({
+      candidates: [{ content: { parts: [{ text: 'hi' }] }, finishReason: 'STOP' }],
+      usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 2, totalTokenCount: 3 }
+    }, 'gemini-3-pro');
+
+    expect(result.model).toBe('gemini-3-pro');
+    expect(result.choices[0]?.message.content).toBe('hi');
+    expect(result.usage?.total_tokens).toBe(3);
   });
 });
