@@ -90,6 +90,7 @@ Common free/developer-tier candidates:
 - `SAMBANOVA_API_KEY`: SambaNova Cloud OpenAI-compatible API with documented free/developer tiers.
 - `CLOUDFLARE_API_TOKEN` plus `CLOUDFLARE_WORKERS_AI_BASE_URL`: Cloudflare Workers AI account API base, for example `https://api.cloudflare.com/client/v4/accounts/<account_id>/ai`; Workers AI has a daily free allocation.
 - `IFLOW_API_KEY`: Optional because iFlow CLI/API availability has changed; verify your account endpoint first.
+- `OPENAI_API_KEY`: OpenAI Responses API or Codex. Set `OPENAI_API_KEY` and enable the optional `openai-responses` or `codex` provider. The provider sends chat requests through the Responses API and normalizes non-streaming responses to chat-completion shape.
 
 ## Fallback Rules
 

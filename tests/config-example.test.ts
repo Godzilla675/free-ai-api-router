@@ -16,7 +16,9 @@ describe('config.example.json', () => {
       'SAMBANOVA_API_KEY',
       'CLOUDFLARE_API_TOKEN',
       'CLOUDFLARE_WORKERS_AI_BASE_URL',
-      'IFLOW_API_KEY'
+      'IFLOW_API_KEY',
+      'OPENAI_API_KEY',
+      'OPENAI_RESPONSES_BASE_URL'
     ]);
     Object.assign(process.env, {
       GROQ_API_KEY: 'groq',
@@ -30,7 +32,9 @@ describe('config.example.json', () => {
       SAMBANOVA_API_KEY: 'sambanova',
       CLOUDFLARE_API_TOKEN: 'cloudflare',
       CLOUDFLARE_WORKERS_AI_BASE_URL: 'https://api.cloudflare.com/client/v4/accounts/example/ai',
-      IFLOW_API_KEY: 'iflow'
+      IFLOW_API_KEY: 'iflow',
+      OPENAI_API_KEY: 'openai-test',
+      OPENAI_RESPONSES_BASE_URL: 'https://api.openai.com/v1'
     });
     try {
       const config = normalizeConfig(JSON.parse(await readFile('config.example.json', 'utf8')));

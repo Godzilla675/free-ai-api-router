@@ -149,6 +149,20 @@
       "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
       "apiKeyEnv": "GEMINI_API_KEY",
       "priority": 70
+    },
+    {
+      "id": "openai-responses",
+      "type": "openai-responses",
+      "baseUrlEnv": "OPENAI_RESPONSES_BASE_URL",
+      "apiKeyEnv": "OPENAI_API_KEY",
+      "optional": true
+    },
+    {
+      "id": "codex",
+      "type": "codex",
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKeyEnv": "OPENAI_API_KEY",
+      "optional": true
     }
   ],
   "models": [
@@ -164,6 +178,13 @@
         { "provider": "sambanova", "model": "Meta-Llama-3.1-8B-Instruct" },
         { "provider": "cloudflare-workers-ai", "model": "@cf/meta/llama-3.1-8b-instruct" },
         { "provider": "opencode", "model": "auto" }
+      ]
+    },
+    {
+      "name": "codex-latest",
+      "aliases": ["gpt-5-codex"],
+      "routes": [
+        { "provider": "codex", "model": "gpt-5-codex" }
       ]
     }
   ]
