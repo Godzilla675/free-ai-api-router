@@ -52,7 +52,8 @@ export function isRetryableError(error: unknown): boolean {
 
 export function toOpenAIError(error: unknown, fallbackStatus = 500): { status: number; body: { error: { message: string; type: string; code: string } } } {
   const status = getErrorStatus(error) ?? fallbackStatus;
-  const message = error instanceof Error ? error.message : String(error);
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  const message = redactErrorMessage(rawMessage);
   const code = error instanceof RouterError ? error.code : statusToCode(status);
   return {
     status,
@@ -64,6 +65,14 @@ export function toOpenAIError(error: unknown, fallbackStatus = 500): { status: n
       }
     }
   };
+}
+
+function redactErrorMessage(message: string): string {
+  return message
+    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
+    .replace(/refresh[_-]?token[=:]\s*[^\s,&}]+/gi, 'refresh_token=[REDACTED]')
+    .replace(/access[_-]?token[=:]\s*[^\s,&}]+/gi, 'access_token=[REDACTED]')
+    .replace(/api[_-]?key[=:]\s*[^\s,&}]+/gi, 'api_key=[REDACTED]');
 }
 
 function statusToCode(status: number): string {

@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import { normalizeConfig } from '../src/config.js';
-import { RouterError } from '../src/errors.js';
+import { RouterError, toOpenAIError } from '../src/errors.js';
 import { createModelRegistry } from '../src/model-registry.js';
 import { createServer } from '../src/server.js';
 import type { ProviderAdapter, RouterConfig } from '../src/types.js';
@@ -124,6 +124,20 @@ describe('security hardening', () => {
       auth: { authDir: '   ' },
       providers: []
     })).toThrow('auth.authDir must be a non-empty string');
+  });
+
+  it('redacts token-like secrets from normalized errors', () => {
+    const error = toOpenAIError(new RouterError(
+      'Bearer abc.def refresh_token=refresh-secret access_token=access-secret api_key=key-secret',
+      { status: 401, code: 'auth_refresh_failed', retryable: false }
+    ));
+    const serialized = JSON.stringify(error.body);
+
+    expect(serialized).not.toContain('abc.def');
+    expect(serialized).not.toContain('refresh-secret');
+    expect(serialized).not.toContain('access-secret');
+    expect(serialized).not.toContain('key-secret');
+    expect(serialized).toContain('[REDACTED]');
   });
 });
 
