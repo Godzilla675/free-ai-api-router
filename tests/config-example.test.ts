@@ -56,6 +56,29 @@ describe('config.example.json', () => {
       restoreEnv(previousEnv);
     }
   });
+
+  it('normalizes optional OpenAI Responses provider when key is present', () => {
+    const previous = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    try {
+      const config = normalizeConfig({
+        server: { authTokens: ['token'], adminToken: 'admin' },
+        providers: [{
+          id: 'openai-responses',
+          type: 'openai-responses',
+          baseUrl: 'https://api.openai.com/v1',
+          apiKeyEnv: 'OPENAI_API_KEY',
+          optional: true
+        }]
+      });
+
+      expect(config.providers?.[0]?.type).toBe('openai-responses');
+      expect(config.providers?.[0]?.apiKey).toBe('test-openai-key');
+    } finally {
+      if (previous === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = previous;
+    }
+  });
 });
 
 function snapshotEnv(names: string[]): Record<string, string | undefined> {

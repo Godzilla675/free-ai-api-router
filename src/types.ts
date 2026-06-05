@@ -1,4 +1,4 @@
-export type ProviderType = 'openai-compatible' | 'gemini' | 'fake';
+export type ProviderType = 'openai-compatible' | 'openai-responses' | 'codex' | 'gemini' | 'aistudio' | 'fake';
 
 export interface LimitRule {
   rpm?: number;
@@ -54,6 +54,7 @@ export interface ProviderConfig {
   modelFilter?: 'free' | string;
   headers?: Record<string, string>;
   timeoutMs?: number;
+  responsesPath?: string;
 }
 
 export interface ConfiguredRoute {
