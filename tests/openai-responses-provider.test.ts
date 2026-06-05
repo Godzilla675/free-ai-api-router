@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import http from 'node:http';
 import { chatToResponsesRequest, responsesToChatResponse } from '../src/translators/responses.js';
 import { OpenAIResponsesProvider } from '../src/providers/openai-responses.js';
+import { createProvider } from '../src/providers/factory.js';
 
 describe('responses translators', () => {
   it('converts chat requests to OpenAI Responses input', () => {
@@ -55,5 +56,17 @@ describe('OpenAIResponsesProvider', () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+});
+
+describe('CodexProvider', () => {
+  it('creates codex provider through factory', () => {
+    const provider = createProvider({
+      id: 'codex',
+      type: 'codex',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'test'
+    });
+    expect(provider.type).toBe('codex');
   });
 });
