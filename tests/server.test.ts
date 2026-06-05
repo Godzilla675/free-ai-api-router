@@ -3,6 +3,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createModelRegistry } from '../src/model-registry.js';
 import { createServer } from '../src/server.js';
 import type { ProviderAdapter, RouterConfig } from '../src/types.js';
+import { AuthManager } from '../src/auth/manager.js';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 
 const servers: http.Server[] = [];
 
@@ -175,5 +180,37 @@ describe('HTTP server', () => {
     expect(d.id).toBe('fake:free-model');
     expect(d.cooldownUntil).toBe(0);
     expect(d.selectionCursor).toBeDefined(); // Since strategy is round-robin
+  });
+
+  it('lists redacted auth records through admin API', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'free-ai-router-auth-'));
+    try {
+      const authManager = await AuthManager.create({ authDir: dir });
+      await authManager.upsert({
+        id: 'auth-1',
+        provider: 'codex',
+        status: 'available',
+        disabled: false,
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+        secrets: { accessToken: 'secret' }
+      });
+
+      const config = { server: { authTokens: ['secret'], adminToken: 'admin-token' }, models: [] } as unknown as RouterConfig;
+      const registry = createModelRegistry([], config);
+      const server = createServer({ providers: [], registry, config, authManager });
+      const baseUrl = await listen(server);
+
+      const response = await fetch(`${baseUrl}/admin/auth`, {
+        headers: { authorization: 'Bearer admin-token' }
+      });
+      const body = await response.json() as { data: Array<{ id: string; secrets?: Record<string, string> }> };
+
+      expect(response.status).toBe(200);
+      expect(body.data[0]?.id).toBe('auth-1');
+      expect(body.data[0]?.secrets?.accessToken).toBe('[REDACTED]');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

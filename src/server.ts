@@ -5,12 +5,14 @@ import { getRetryAfterMs, RouterError, toOpenAIError } from './errors.js';
 import type { ChatRequest, ProviderAdapter, RouterConfig } from './types.js';
 import type { ModelRegistry } from './model-registry.js';
 import { JsonlUsageRecorder } from './usage.js';
+import type { AuthManager } from './auth/manager.js';
 
 export interface ServerOptions {
   providers: ProviderAdapter[];
   registry: ModelRegistry;
   config: RouterConfig;
   router?: AiRouter;
+  authManager?: AuthManager;
 }
 
 export function createServer(options: ServerOptions): http.Server {
@@ -33,6 +35,9 @@ export function createServer(options: ServerOptions): http.Server {
       if (url.pathname.startsWith('/admin/')) {
         if (!authorized(request, [options.config.server?.adminToken].filter(Boolean) as string[])) {
           return sendJson(response, 401, toOpenAIError(new Error('Unauthorized'), 401).body);
+        }
+        if (request.method === 'GET' && url.pathname === '/admin/auth') {
+          return sendJson(response, 200, { data: options.authManager?.listRedacted() ?? [] });
         }
         if (request.method === 'GET' && url.pathname === '/admin/providers') {
           const seen = new Set<string>();

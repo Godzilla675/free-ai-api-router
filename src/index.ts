@@ -3,6 +3,8 @@ import { loadConfig } from './config.js';
 import { createModelRegistry } from './model-registry.js';
 import { createProviders } from './providers/factory.js';
 import { createServer } from './server.js';
+import { AuthManager } from './auth/manager.js';
+
 
 async function main(): Promise<void> {
   const configPath = getArg('--config') ?? process.env.FREE_AI_ROUTER_CONFIG ?? 'config.json';
@@ -10,7 +12,8 @@ async function main(): Promise<void> {
   const providers = createProviders(config.providers ?? []);
   const registry = createModelRegistry(providers, config);
   await registry.refresh();
-  const server = createServer({ providers, registry, config });
+  const authManager = await AuthManager.create({ authDir: config.auth?.authDir ?? 'router-state/auth' });
+  const server = createServer({ providers, registry, config, authManager });
   const host = config.server?.host ?? '127.0.0.1';
   const port = config.server?.port ?? 8080;
   server.listen(port, host, () => {
