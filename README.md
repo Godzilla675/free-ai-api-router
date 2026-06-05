@@ -128,6 +128,7 @@ The router estimates prompt tokens before dispatch and records upstream usage wh
 - `GET /admin/auth`: lists redacted auth records.
 - `PATCH /admin/auth/:id`: toggles `disabled`.
 - `DELETE /admin/auth/:id`: removes an auth record.
+- `GET /admin/operations`: returns routing config, health cooldown snapshot, and recent usage. Requires admin bearer token.
 
 ## Auth State
 
@@ -161,6 +162,12 @@ Persist `router-state/` if you want usage logs to survive restarts. Rotate `rout
 ## Compliance Boundary
 
 Default examples use API keys and officially exposed HTTP/server endpoints, but the project supports operator-authorized token/credential files (e.g. for CLIProxyAPI parity integrations). Multi-account scheduling and pooling are supported, provided they are explicitly configured by the operator and avoid implicit scanning of unrelated system directories or browser storage. If you use Gemini CLI, Codex CLI, Claude Code, Antigravity, CLIProxyAPI, OpenCode, or similar tools as upstreams, keep that local, user-owned, and compliant with each provider's terms.
+
+## Channel Compatibility
+
+The router includes a translator framework for OpenAI, Claude, Gemini, and Codex-shaped payloads. Channel provider skeletons expose explicit `501 not_implemented` errors until a channel executor is completed.
+
+`server.websocketEnabled` defaults to `false`. When enabled before a concrete websocket executor is configured, `/v1/ws` returns `501 not_implemented`.
 
 ## Development
 
