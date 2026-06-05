@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AuthStore } from '../src/auth/store.js';
+import { AuthManager } from '../src/auth/manager.js';
 
 describe('auth records', () => {
   it('redacts secret material from auth records', () => {
@@ -44,6 +45,35 @@ describe('AuthStore', () => {
       expect(reloaded).toHaveLength(1);
       expect(reloaded[0]?.id).toBe('auth-1');
       expect(reloaded[0]?.secrets?.accessToken).toBe('secret');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('AuthManager', () => {
+  it('lists redacted auth records and persists status changes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'free-ai-router-auth-'));
+    try {
+      const manager = await AuthManager.create({ authDir: dir });
+      await manager.upsert({
+        id: 'codex-main',
+        provider: 'codex',
+        status: 'available',
+        disabled: false,
+        createdAt: '2026-06-05T00:00:00.000Z',
+        updatedAt: '2026-06-05T00:00:00.000Z',
+        secrets: { accessToken: 'secret' }
+      });
+
+      await manager.setDisabled('codex-main', true);
+
+      const records = manager.listRedacted();
+      expect(records[0]?.disabled).toBe(true);
+      expect(records[0]?.secrets?.accessToken).toBe('[REDACTED]');
+
+      const reloaded = await AuthManager.create({ authDir: dir });
+      expect(reloaded.listRedacted()[0]?.disabled).toBe(true);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
