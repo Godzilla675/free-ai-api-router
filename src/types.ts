@@ -1,4 +1,4 @@
-export type ProviderType = 'openai-compatible' | 'openai-responses' | 'codex' | 'gemini' | 'aistudio' | 'fake';
+export type ProviderType = 'openai-compatible' | 'openai-responses' | 'codex' | 'gemini' | 'aistudio' | 'claude' | 'xai' | 'kimi' | 'fake';
 
 export interface LimitRule {
   rpm?: number;
