@@ -6,6 +6,7 @@ import type { ChatRequest, ProviderAdapter, RouterConfig } from './types.js';
 import type { ModelRegistry } from './model-registry.js';
 import { JsonlUsageRecorder } from './usage.js';
 import type { AuthManager } from './auth/manager.js';
+import { redactAuthRecord } from './auth/types.js';
 
 export interface ServerOptions {
   providers: ProviderAdapter[];
@@ -38,6 +39,23 @@ export function createServer(options: ServerOptions): http.Server {
         }
         if (request.method === 'GET' && url.pathname === '/admin/auth') {
           return sendJson(response, 200, { data: options.authManager?.listRedacted() ?? [] });
+        }
+        const authMatch = /^\/admin\/auth\/([^/]+)$/.exec(url.pathname);
+        if (authMatch && request.method === 'PATCH') {
+          if (!options.authManager) return sendJson(response, 404, toOpenAIError(new Error('Not found'), 404).body);
+          const body = await readJson<{ disabled?: unknown }>(request, maxBodyBytes);
+          if (typeof body.disabled !== 'boolean') {
+            throw new RouterError('disabled must be boolean', { status: 400, code: 'invalid_request', retryable: false });
+          }
+          const updated = await options.authManager.setDisabled(decodeURIComponent(authMatch[1]!), body.disabled);
+          return sendJson(response, 200, { data: redactAuthRecord(updated) });
+        }
+        if (authMatch && request.method === 'DELETE') {
+          if (!options.authManager) return sendJson(response, 404, toOpenAIError(new Error('Not found'), 404).body);
+          await options.authManager.delete(decodeURIComponent(authMatch[1]!));
+          response.statusCode = 204;
+          response.end();
+          return;
         }
         if (request.method === 'GET' && url.pathname === '/admin/providers') {
           const seen = new Set<string>();

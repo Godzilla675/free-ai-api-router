@@ -213,4 +213,39 @@ describe('HTTP server', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('disables and deletes auth records through admin API', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'free-ai-router-auth-'));
+    try {
+      const authManager = await AuthManager.create({ authDir: dir });
+      await authManager.upsert({
+        id: 'auth-1',
+        provider: 'codex',
+        status: 'available',
+        disabled: false,
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString()
+      });
+
+      const config = { server: { authTokens: ['secret'], adminToken: 'admin-token' }, models: [] } as unknown as RouterConfig;
+      const registry = createModelRegistry([], config);
+      const server = createServer({ providers: [], registry, config, authManager });
+      const baseUrl = await listen(server);
+
+      const patch = await fetch(`${baseUrl}/admin/auth/auth-1`, {
+        method: 'PATCH',
+        headers: { authorization: 'Bearer admin-token', 'content-type': 'application/json' },
+        body: JSON.stringify({ disabled: true })
+      });
+      expect(patch.status).toBe(200);
+
+      const del = await fetch(`${baseUrl}/admin/auth/auth-1`, {
+        method: 'DELETE',
+        headers: { authorization: 'Bearer admin-token' }
+      });
+      expect(del.status).toBe(204);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
