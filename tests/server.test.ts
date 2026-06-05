@@ -248,4 +248,42 @@ describe('HTTP server', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('returns native response shape for /v1/responses when router output is chat-normalized', async () => {
+    const provider: ProviderAdapter = {
+      id: 'fake',
+      type: 'fake',
+      priority: 0,
+      async listModels() { return [{ id: 'shared-model' }]; },
+      async chat(request) {
+        return {
+          response: {
+            id: 'chatcmpl_fake',
+            object: 'chat.completion',
+            created: 1,
+            model: request.model,
+            choices: [{ index: 0, message: { role: 'assistant', content: 'hello from responses' }, finish_reason: 'stop' }]
+          }
+        };
+      }
+    };
+    const config = { server: { authTokens: ['dev-token'], adminToken: 'admin' }, models: [], routing: { strategy: 'priority' } } as unknown as RouterConfig;
+    const registry = createModelRegistry([provider], config);
+    await registry.refresh();
+    const baseUrl = await listen(createServer({ providers: [provider], registry, config }));
+
+    const response = await fetch(`${baseUrl}/v1/responses`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer dev-token',
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ model: 'shared-model', input: 'hello' })
+    });
+    const body = await response.json() as { object?: string; output_text?: string };
+
+    expect(response.status).toBe(200);
+    expect(body.object).toBe('response');
+    expect(typeof body.output_text).toBe('string');
+  });
 });
