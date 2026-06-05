@@ -105,4 +105,15 @@ describe('AuthManager', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('registers gemini-oauth provider handler by default', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'free-ai-router-auth-'));
+    try {
+      const manager = await AuthManager.create({ authDir: dir });
+      const handlers = (manager as any).handlers as Map<string, any>;
+      expect(handlers.has('gemini-oauth')).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

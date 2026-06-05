@@ -2,6 +2,7 @@ import { AuthStore } from './store.js';
 import type { AuthRecord, RedactedAuthRecord } from './types.js';
 import { redactAuthRecord } from './types.js';
 import type { AuthProviderHandler } from './providers/provider.js';
+import { GeminiOAuthHandler } from './providers/gemini-oauth.js';
 
 export interface AuthManagerConfig {
   authDir: string;
@@ -15,6 +16,7 @@ export class AuthManager {
 
   static async create(config: AuthManagerConfig): Promise<AuthManager> {
     const manager = new AuthManager(new AuthStore(config.authDir));
+    manager.registerProviderHandler('gemini-oauth', new GeminiOAuthHandler());
     for (const record of await manager.store.loadAll()) {
       manager.records.set(record.id, record);
     }
