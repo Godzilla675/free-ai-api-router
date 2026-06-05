@@ -21,27 +21,33 @@ export interface OpenAIResponsesResponse {
 }
 
 export function chatToResponsesRequest(request: ChatRequest): OpenAIResponsesRequest {
-  return {
+  const result: OpenAIResponsesRequest = {
     ...request,
     input: request.messages.map((message) => ({
       role: message.role,
       content: [{ type: message.role === 'assistant' ? 'output_text' : 'input_text', text: stringifyContent(message.content) }]
     })),
-    max_output_tokens: request.max_tokens,
     messages: undefined
   };
+  if (request.max_tokens !== undefined) {
+    result.max_output_tokens = request.max_tokens;
+  }
+  return result;
 }
 
 export function responsesToChatResponse(response: OpenAIResponsesResponse): OpenAIChatResponse {
   const content = typeof response.output_text === 'string' ? response.output_text : JSON.stringify(response.output ?? '');
-  return {
+  const result: OpenAIChatResponse = {
     id: response.id.startsWith('resp_') ? `chatcmpl_${response.id}` : response.id,
     object: 'chat.completion',
     created: response.created_at ?? Math.floor(Date.now() / 1000),
     model: response.model,
-    choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
-    ...(response.usage ? { usage: response.usage as OpenAIChatResponse['usage'] } : {})
+    choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }]
   };
+  if (response.usage) {
+    result.usage = response.usage as NonNullable<OpenAIChatResponse['usage']>;
+  }
+  return result;
 }
 
 function stringifyContent(content: unknown): string {
