@@ -48,12 +48,13 @@ export type RedactedAuthRecord = Omit<AuthRecord, 'secrets'> & {
 };
 
 export function redactAuthRecord(record: AuthRecord): RedactedAuthRecord {
-  const secrets = record.secrets
-    ? Object.fromEntries(Object.keys(record.secrets).map((key) => [key, '[REDACTED]' as const]))
+  const { secrets, ...rest } = record;
+  const redactedSecrets = secrets
+    ? Object.fromEntries(Object.keys(secrets).map((key) => [key, '[REDACTED]' as const]))
     : undefined;
 
   return {
-    ...record,
-    ...(secrets ? { secrets } : {})
+    ...rest,
+    ...(redactedSecrets ? { secrets: redactedSecrets } : {})
   };
 }
