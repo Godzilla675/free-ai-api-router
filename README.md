@@ -124,6 +124,13 @@ The router estimates prompt tokens before dispatch and records upstream usage wh
 - `GET /health`: basic process status.
 - `GET /admin/providers`: provider list, health cooldown state, active routing strategies, and deployment cursors/error metrics. Requires admin bearer token.
 - `GET /admin/usage?limit=100`: recent usage events from the configured recorder. Requires admin bearer token.
+- `GET /admin/auth`: lists redacted auth records.
+- `PATCH /admin/auth/:id`: toggles `disabled`.
+- `DELETE /admin/auth/:id`: removes an auth record.
+
+## Auth State
+
+Plan B introduces file-backed auth records under `auth.authDir` (default `router-state/auth`). Auth JSON files may contain provider tokens or API keys and must never be committed. Admin APIs always redact `secrets`.
 
 ## Docker
 

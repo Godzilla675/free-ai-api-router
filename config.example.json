@@ -28,6 +28,11 @@
   "storage": {
     "usageLogPath": "router-state/usage.jsonl"
   },
+  "auth": {
+    "authDir": "router-state/auth",
+    "refreshIntervalMs": 60000,
+    "refreshJitterMs": 5000
+  },
   "providers": [
     {
       "id": "groq",
