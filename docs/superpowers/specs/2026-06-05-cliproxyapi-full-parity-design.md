@@ -1,4 +1,4 @@
-# CLIProxyAPI Full-Parity Port Design (TypeScript)
+# CLIProxyAPI Parity Program — Plan A Implementation Spec (TypeScript)
 
 **Date:** 2026-06-05  
 **Repository:** `Godzilla675/free-ai-api-router`  
@@ -7,7 +7,7 @@
 
 ## 1. Scope and parity target
 
-This design targets functional parity (not line-by-line parity) for:
+Program target is full functional parity (not line-by-line parity) for:
 
 1. Multi-provider auth and execution for Gemini, AI Studio Build, Codex/OpenAI, Claude, Grok/xAI, Kimi, Antigravity-like channels, and OpenAI-compatible upstreams.
 2. OAuth/device-login and file-backed credential lifecycle (login, refresh, cooldown, disable/enable, metadata).
@@ -16,7 +16,30 @@ This design targets functional parity (not line-by-line parity) for:
 5. Provider/channel translators between OpenAI/Claude/Gemini/Codex request-response formats.
 6. Management APIs for credential and runtime administration.
 
-Parity is defined as equivalent operator behavior and API outputs for supported scenarios in test coverage.
+### 1.1 Parity matrix (program target + Plan A target)
+
+| Area | Program parity target | Plan A parity target (this spec) |
+| --- | --- | --- |
+| Public API | `/v1/models`, `/v1/chat/completions`, `/v1/responses`, streaming chat/responses, websocket routes where needed | keep existing `/v1` behavior stable; no new streaming/ws API yet |
+| Routing | priority, weighted, round-robin, fill-first, session-affinity, cooldown-aware fallback | implement round-robin, fill-first, session-affinity, retry-after cooldown |
+| Credentials | file-backed auth records, per-auth metadata/proxy/header overrides, enable/disable, refresh scheduling | config schema foundation only (types/validation hooks) |
+| Providers/channels | OpenAI/Codex, Gemini, AI Studio Build, Claude, Grok/xAI, Kimi, OpenAI-compatible pools | no new provider executors in Plan A |
+| Management | auth listing/update endpoints, health/usage/provider status | extend `/admin/providers` diagnostics for scheduler/cooldown visibility |
+
+Program parity is achieved only when all plan specs (A-D) pass their fixture catalog and endpoint acceptance tests.
+
+### 1.2 Program decomposition (scope control)
+
+This document is a **single executable implementation spec for Plan A only**.
+
+Program decomposition:
+
+1. Plan A: Scheduler + config + reliability baseline.
+2. Plan B: Auth lifecycle + management API.
+3. Plan C: Codex/OpenAI and Gemini/AI Studio channel parity.
+4. Plan D: Remaining channel translators + operational hardening.
+
+Only Plan A is in scope for immediate implementation planning and execution.
 
 ## 2. Architectural strategy
 
@@ -31,51 +54,98 @@ Current router architecture is compact and provider-adapter based. Full parity r
 
 Implementation remains TypeScript ESM, but moves from "single router core" to a modular runtime.
 
-## 3. Planned module map (new/expanded files)
+## 3. Plan A module map (new/expanded files only)
 
-### 3.1 Auth and credential lifecycle
+### 3.1 Scheduler and selection
 
-- `src/auth/types.ts`: `AuthRecord`, quota state, model state, credential metadata.
-- `src/auth/store.ts`: filesystem persistence for auth records.
-- `src/auth/providers/*.ts`: provider-specific auth clients (Codex OAuth, Gemini OAuth/API-key, Claude OAuth, etc.).
-- `src/auth/manager.ts`: lifecycle manager (load, validate, refresh schedule, update status).
-- `src/auth/session-cache.ts`: session-affinity binding cache with TTL/eviction.
+- `src/scheduler/selector.ts`: deterministic round-robin and fill-first selectors.
+- `src/scheduler/session-affinity.ts`: session key extraction, sticky binding table, TTL eviction.
+- `src/scheduler/types.ts`: scheduler state types and config types.
 
-### 3.2 Scheduler and selection
+### 3.2 Router and health integration
 
-- `src/scheduler/selector.ts`: round-robin and fill-first selectors.
-- `src/scheduler/session-affinity.ts`: session extraction and sticky binding logic.
-- `src/scheduler/scheduler.ts`: model+provider shard scheduling with cooldown/pinned-auth behavior.
+- `src/router.ts`: route candidate selection wired to scheduler strategies.
+- `src/health.ts`: cooldown supports retry-after override timestamps.
+- `src/errors.ts`: retain/propagate retry-after metadata consistently.
 
-### 3.3 Executors and transports
+### 3.3 Config and API diagnostics
 
-- `src/executors/base.ts`: executor interface.
-- `src/executors/openai.ts`, `codex.ts`, `gemini.ts`, `aistudio.ts`, `claude.ts`, etc.
-- `src/executors/ws-relay.ts`: websocket-backed request relay for channels that require it.
-- `src/executors/retry.ts`: bounded retry and fallback orchestration.
+- `src/types.ts`/`src/config.ts`: add Plan A routing fields.
+- `src/server.ts`: enrich `/admin/providers` output with scheduler/cooldown diagnostics.
 
-### 3.4 Translators
+## 4. Interface contracts (Plan A boundaries)
 
-- `src/translators/openai/*`, `src/translators/claude/*`, `src/translators/gemini/*`, `src/translators/codex/*`.
-- Stateless mapping functions for request/response conversion in both stream and non-stream paths.
+### 4.1 Scheduler contract
 
-### 3.5 API and management
+- Input: `AuthSnapshot[]`, provider key, model key, request metadata.
+- Output: `SelectionResult { deploymentId, providerId, reason, retryAfterMs? }`.
+- Guarantees:
+  - deterministic selection for round-robin/fill-first/session-affinity,
+  - never returns disabled auth,
+  - can return cooldown/unavailable terminal errors with retry hints.
 
-- Expand `src/server.ts` into route modules:
-  - `src/api/v1/*.ts` for models/chat/responses/images/ws.
-  - `src/api/management/*.ts` for auth/config/admin operations.
+### 4.2 Session-affinity contract (exact)
 
-### 3.6 Config and compatibility
+- Config fields:
+  - `routing.sessionAffinity: boolean` (default `false`)
+  - `routing.sessionAffinityTtlMs: number` (default `3_600_000`)
+  - `routing.sessionAffinityMaxEntries: number` (default `10_000`)
+- Session key precedence (first non-empty wins):
+  1. `X-Session-ID`
+  2. `Session-Id`
+  3. `Session_id`
+  4. body `conversation_id`
+  5. hash of first 3 user/assistant message contents
+- Eviction algorithm:
+  - strict TTL expiry on read/write,
+  - if size exceeds `maxEntries`, evict least-recently-used entry.
 
-- Expand `src/types.ts`/`src/config.ts` to include parity config schema:
-  - OAuth/auth blocks per provider.
-  - Routing strategy and session-affinity options.
-  - Retry/cooldown knobs.
-  - Per-auth proxy/header/model alias/exclusion controls.
+### 4.3 Management API contract (Plan A concrete)
 
-## 4. Data flow design
+- `GET /admin/providers` (admin token required) response adds:
+  - `routing.strategy`
+  - `routing.sessionAffinity` and `routing.sessionAffinityTtlMs`
+  - `deployments[].cooldownUntil`
+  - `deployments[].lastError`
+  - `deployments[].selectionCursor` (when applicable)
+- Error responses:
+  - `401 unauthorized` for missing/invalid admin bearer
+  - `500 upstream_error` for internal state failures
 
-### 4.1 Request path
+Response shape (added fields only):
+
+```json
+{
+  "routing": {
+    "strategy": "round-robin",
+    "sessionAffinity": true,
+    "sessionAffinityTtlMs": 3600000
+  },
+  "deployments": [
+    {
+      "id": "openrouter:moonshotai/kimi-k2",
+      "cooldownUntil": 0,
+      "lastError": {
+        "message": "rate limited",
+        "status": 429,
+        "retryable": true,
+        "updatedAt": "2026-06-05T13:00:00.000Z"
+      },
+      "selectionCursor": 3
+    }
+  ]
+}
+```
+
+Field semantics:
+
+- `cooldownUntil`: unix epoch milliseconds; `0` means eligible now.
+- `lastError`: omitted when no recorded error for deployment in current process lifetime.
+- `selectionCursor`: integer cursor for deterministic strategies; omitted for strategies that do not track cursors.
+
+## 5. Data flow design (Plan A)
+
+### 5.1 Request path
 
 1. API route parses request and identifies protocol shape.
 2. Translator normalizes to executor-native request.
@@ -87,15 +157,7 @@ Implementation remains TypeScript ESM, but moves from "single router core" to a 
    - retries/fallback applied when retryable.
 6. Translator maps response back to requested downstream protocol.
 
-### 4.2 Auth lifecycle path
-
-1. On startup: load auth records from configured auth directory.
-2. Validate and normalize records, compute stable IDs.
-3. Start refresh workers for expiring OAuth credentials.
-4. Persist status transitions (available, cooling, disabled, quota-exceeded).
-5. Expose operations via management API for inspection and maintenance.
-
-## 5. Error handling and reliability model
+## 6. Error handling and reliability model
 
 1. Retain explicit retryable vs non-retryable classification.
 2. Track cooldown at both auth-level and auth+model-level.
@@ -104,7 +166,16 @@ Implementation remains TypeScript ESM, but moves from "single router core" to a 
 5. Ensure streaming pathways stop fallback after bytes are emitted.
 6. Keep secret redaction in all upstream error surfaces and logs.
 
-## 6. Security and policy delta
+### 6.1 Retry/fallback stage rules (explicit)
+
+1. **Pre-dispatch failures** (auth unavailable, local validation error): no upstream retry; fallback to next eligible auth only when error is retryable.
+2. **Pre-first-byte upstream failures** (timeout/network/HTTP retryable): may retry same auth or fallback to next auth per policy.
+3. **Post-first-byte stream failures:** no fallback to a different auth in same request; terminate stream with translated terminal error event.
+4. **Auth failures (`401/403/invalid_grant`)**: mark non-retryable for that auth until refreshed/re-enabled.
+
+Note: websocket-specific fallback rules are deferred to Plan C and intentionally not implemented in Plan A.
+
+## 7. Security and policy delta
 
 To satisfy owner-requested parity, this project intentionally changes prior boundary:
 
@@ -116,51 +187,38 @@ To satisfy owner-requested parity, this project intentionally changes prior boun
    - localhost gating for sensitive management endpoints by default,
    - explicit feature flags for high-risk channels.
 
+### 7.1 Credential-source guardrails (explicit)
+
+1. Accepted credential sources:
+   - interactive OAuth/device login performed by this service,
+   - operator-provided token files in configured auth directory,
+   - explicit API keys in config/env.
+2. Rejected sources:
+   - scanning unrelated home/profile directories by default,
+   - importing browser storage without explicit operator action,
+   - implicit token extraction from unrelated applications.
+3. All imported credentials must be represented as explicit auth records with audit metadata (`source`, `createdAt`, `updatedAt`).
+
 `README.md`, `SECURITY.md`, and contributor guidance must be updated to reflect this policy change.
 
-## 7. Delivery phases (implementation order)
+## 8. Plan A scope
 
-## Phase 1 — Scheduler and config foundation
+### 8.1 Plan A work packages (implementation order)
 
 1. Add routing strategies: `round-robin`, `fill-first`, `session-affinity`.
-2. Add session-affinity extraction and TTL cache.
-3. Add per-deployment cooldown improvements using retry-after.
-4. Extend tests for deterministic selection and cooldown behavior.
+2. Add session-affinity extraction and TTL cache with bounded size and deterministic eviction.
+3. Add per-deployment cooldown improvements using retry-after precedence.
+4. Extend `/admin/providers` with scheduler/cooldown diagnostics defined in §4.5.
+5. Extend tests for deterministic selection and cooldown behavior.
 
-## Phase 2 — Auth core and management skeleton
+### 8.2 Plan A out-of-scope
 
-1. Introduce auth record types and store.
-2. Implement auth manager load/update/persist loop.
-3. Add management endpoints for listing/updating auth state.
-4. Add regression tests for auth persistence and state transitions.
+1. New OAuth login flows.
+2. New provider executors/translators.
+3. New websocket endpoints.
+4. Management auth CRUD endpoints.
 
-## Phase 3 — OpenAI/Codex parity surface
-
-1. Add dedicated Codex executor path and OpenAI Responses parity.
-2. Add codex-specific model aliasing and request metadata handling.
-3. Add streaming and websocket behavior required for codex clients.
-4. Add tests for responses/chunking/error translation.
-
-## Phase 4 — Gemini and AI Studio Build channels
-
-1. Add Gemini OAuth/API-key auth lifecycle parity.
-2. Add AI Studio executor path (including websocket relay integration).
-3. Add model alias and exclusion controls.
-4. Add tests for non-stream and stream pathways.
-
-## Phase 5 — Remaining provider families and translator parity
-
-1. Claude/Grok/Kimi/Antigravity channel executors and translators.
-2. OpenAI-compat provider pool behavior parity.
-3. Cross-protocol translation tests and compatibility tests.
-
-## Phase 6 — Operational hardening and docs
-
-1. Usage/health/admin observability parity.
-2. Full docs update for config, auth flows, and management API.
-3. CI updates for larger test matrix and smoke scenarios.
-
-## 8. Test strategy (TDD-first)
+## 9. Test strategy (Plan A, TDD-first)
 
 For each phase:
 
@@ -171,23 +229,32 @@ For each phase:
 Test suites:
 
 - `tests/router-fallback.test.ts` and new scheduler tests.
-- provider/executor tests per channel.
-- management API tests.
-- security regression tests for auth and token redaction.
-- end-to-end smoke tests covering auth selection and fallback.
+- `tests/server.test.ts` for `/admin/providers` diagnostics.
+- `tests/reliability-hardening.test.ts` for retry-after cooldown behavior.
 
-## 9. Risks and mitigations
+### 9.1 Plan A fixture catalog (required)
+
+| Fixture ID | Scenario | Expected result |
+| --- | --- | --- |
+| `planA-rr-001` | 3 deployments same model, round-robin strategy | call order rotates deterministically |
+| `planA-ff-001` | 3 deployments same model, fill-first strategy | first healthy deployment always selected |
+| `planA-sa-001` | repeated requests with same session key | same deployment selected until unavailable |
+| `planA-sa-002` | bound deployment enters cooldown | affinity rebinds to next eligible deployment |
+| `planA-ra-001` | retryable failure with Retry-After header | cooldown uses retry-after window over default cooldown |
+| `planA-admin-001` | `/admin/providers` after strategy/cooldown activity | diagnostics fields from §4.3 are present |
+
+## 10. Risks and mitigations (Plan A)
 
 1. **Complexity jump:** mitigated by phased modularization and strict interfaces.
-2. **Behavior drift from upstream:** mitigated by parity test vectors and fixture-based comparisons.
-3. **Security regressions from expanded auth surface:** mitigated by redaction tests, explicit endpoint guards, and config validation.
-4. **Long-running delivery:** mitigated by milestone-based slices that are independently runnable.
+2. **Non-deterministic scheduler bugs:** mitigated by deterministic fixture tests in §9.1.
+3. **Cache growth/regressions:** mitigated by max-entry + LRU+TTL tests.
+4. **Long-running delivery:** mitigated by limiting this spec strictly to Plan A.
 
-## 10. Definition of done
+## 11. Definition of done (Plan A)
 
-1. Config supports full targeted provider/auth/routing options.
-2. Multi-account scheduler and session-affinity behavior match parity expectations.
-3. Codex and AI Studio pathways are operational.
-4. Management and observability endpoints cover auth and runtime state.
-5. Documentation and examples reflect new policy and usage.
+1. Config supports Plan A routing fields and validation defaults.
+2. Round-robin/fill-first/session-affinity selection pass all §9.1 fixtures.
+3. Retry-after cooldown precedence works for retryable failures.
+4. `/admin/providers` returns Plan A diagnostics in §4.3.
+5. Documentation reflects new Plan A routing controls.
 6. Build, typecheck, tests, smoke, and audit pass in CI.
