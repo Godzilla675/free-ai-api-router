@@ -1,9 +1,16 @@
 import type { Deployment } from './types.js';
 
-interface HealthEntry {
+export interface HealthError {
+  message: string;
+  status?: number | undefined;
+  retryable: boolean;
+  updatedAt: string;
+}
+
+export interface HealthEntry {
   consecutiveFailures: number;
   cooldownUntil: number;
-  lastError?: string;
+  lastError?: HealthError | undefined;
 }
 
 export class HealthTracker {
@@ -20,18 +27,32 @@ export class HealthTracker {
     this.entries.set(deployment.id, { consecutiveFailures: 0, cooldownUntil: 0 });
   }
 
-  markFailure(deployment: Deployment, error: string, retryable: boolean, now = Date.now()): void {
+  markFailure(
+    deployment: Deployment,
+    error: string,
+    retryable: boolean,
+    options?: { statusCode?: number | undefined; retryAfterMs?: number | undefined; now?: number | undefined }
+  ): void {
     if (!retryable) {
       return;
     }
     const previous = this.entries.get(deployment.id) ?? { consecutiveFailures: 0, cooldownUntil: 0 };
     const failures = previous.consecutiveFailures + 1;
     const threshold = this.options.failureThreshold ?? 1;
-    const cooldownMs = this.options.cooldownMs ?? 30_000;
+    const now = options?.now ?? Date.now();
+    const cooldownMs = options?.retryAfterMs !== undefined && options.retryAfterMs > 0
+      ? options.retryAfterMs
+      : (this.options.cooldownMs ?? 30_000);
+
     this.entries.set(deployment.id, {
       consecutiveFailures: failures,
       cooldownUntil: failures >= threshold ? now + cooldownMs : 0,
-      lastError: error
+      lastError: {
+        message: error,
+        status: options?.statusCode,
+        retryable,
+        updatedAt: new Date(now).toISOString()
+      }
     });
   }
 

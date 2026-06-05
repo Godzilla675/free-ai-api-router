@@ -123,4 +123,57 @@ describe('HTTP server', () => {
 
     expect(response.status).toBe(400);
   });
+
+  it('planA-admin-001: GET /admin/providers returns enriched diagnostics', async () => {
+    const provider: ProviderAdapter = {
+      id: 'fake',
+      type: 'fake',
+      priority: 0,
+      async listModels() { return [{ id: 'free-model' }]; },
+      async chat(request) {
+        return {
+          response: {
+            id: 'chatcmpl_fake',
+            object: 'chat.completion',
+            created: 1,
+            model: request.model,
+            choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }]
+          }
+        };
+      }
+    };
+    const config = {
+      server: { authTokens: ['secret'], adminToken: 'admin' },
+      models: [],
+      routing: {
+        strategy: 'round-robin',
+        sessionAffinity: true,
+        sessionAffinityTtlMs: 3600000
+      }
+    } as unknown as RouterConfig;
+    const registry = createModelRegistry([provider], config);
+    await registry.refresh();
+    const baseUrl = await listen(createServer({ providers: [provider], registry, config }));
+
+    // Request admin/providers
+    const response = await fetch(`${baseUrl}/admin/providers`, {
+      headers: { authorization: 'Bearer admin' }
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as any;
+
+    // Verify added fields from §4.3
+    expect(body.routing).toBeDefined();
+    expect(body.routing.strategy).toBe('round-robin');
+    expect(body.routing.sessionAffinity).toBe(true);
+    expect(body.routing.sessionAffinityTtlMs).toBe(3600000);
+
+    expect(body.deployments).toBeDefined();
+    expect(body.deployments.length).toBeGreaterThan(0);
+    const d = body.deployments[0];
+    expect(d.id).toBe('fake:free-model');
+    expect(d.cooldownUntil).toBe(0);
+    expect(d.selectionCursor).toBeDefined(); // Since strategy is round-robin
+  });
 });

@@ -54,6 +54,9 @@ export function normalizeConfig(config: RouterConfig): RouterConfig {
       healthCooldownMs: 30_000,
       debugHeaders: false,
       modelRefreshTtlMs: 300_000,
+      sessionAffinity: false,
+      sessionAffinityTtlMs: 3_600_000,
+      sessionAffinityMaxEntries: 10_000,
       ...(config.routing ?? {})
     },
     limits: config.limits ?? {},
@@ -83,6 +86,19 @@ function validateConfig(config: RouterConfig): void {
   }
   if (!config.server?.adminToken?.trim()) {
     throw new RouterError('server.adminToken must be configured', { status: 400, code: 'invalid_config', retryable: false });
+  }
+
+  if (config.routing?.sessionAffinityTtlMs !== undefined) {
+    const ttl = config.routing.sessionAffinityTtlMs;
+    if (typeof ttl !== 'number' || !Number.isFinite(ttl) || ttl <= 0) {
+      throw new RouterError('routing.sessionAffinityTtlMs must be a positive number', { status: 400, code: 'invalid_config', retryable: false });
+    }
+  }
+  if (config.routing?.sessionAffinityMaxEntries !== undefined) {
+    const max = config.routing.sessionAffinityMaxEntries;
+    if (typeof max !== 'number' || !Number.isInteger(max) || max <= 0) {
+      throw new RouterError('routing.sessionAffinityMaxEntries must be a positive integer', { status: 400, code: 'invalid_config', retryable: false });
+    }
   }
 
   const providerIds = new Set<string>();

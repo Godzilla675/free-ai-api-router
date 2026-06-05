@@ -24,11 +24,14 @@ export interface ServerConfig {
 }
 
 export interface RoutingConfig {
-  strategy?: 'priority' | 'weighted';
+  strategy?: 'priority' | 'weighted' | 'round-robin' | 'fill-first' | 'session-affinity';
   maxFallbacks?: number;
   healthCooldownMs?: number;
   debugHeaders?: boolean;
   modelRefreshTtlMs?: number;
+  sessionAffinity?: boolean;
+  sessionAffinityTtlMs?: number;
+  sessionAffinityMaxEntries?: number;
 }
 
 export interface StorageConfig {
@@ -174,6 +177,7 @@ export interface ChatContext {
   userId: string;
   apiKeyHash?: string;
   requestId?: string;
+  headers?: Record<string, string | string[] | undefined>;
 }
 
 export interface AttemptRecord {

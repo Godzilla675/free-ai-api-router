@@ -1,10 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import { getErrorStatus, isRetryableError, RouterError } from './errors.js';
+import { getErrorStatus, getRetryAfterMs, isRetryableError, RouterError } from './errors.js';
+import type { HealthEntry } from './health.js';
 import { HealthTracker } from './health.js';
 import type { ModelRegistry } from './model-registry.js';
 import { RateLimiter } from './rate-limit.js';
 import { MemoryUsageRecorder, type UsageRecorder } from './usage.js';
 import type { AttemptRecord, ChatContext, ChatRequest, Deployment, ProviderAdapter, RoutedChatResult, RouterConfig, UsageTokens } from './types.js';
+import { SessionAffinityTracker, extractSessionKey } from './scheduler/session-affinity.js';
+import { RoundRobinSelector } from './scheduler/selector.js';
 
 export interface AiRouterOptions {
   providers: ProviderAdapter[];
@@ -21,18 +24,32 @@ export class AiRouter {
   private readonly health: HealthTracker;
   private readonly usage: UsageRecorder;
   private lastRegistryRefresh = 0;
+  private readonly sessionAffinity: SessionAffinityTracker;
+  private readonly roundRobinSelector: RoundRobinSelector;
 
   constructor(private readonly options: AiRouterOptions) {
     this.providers = new Map(options.providers.map((provider) => [provider.id, provider]));
     this.rateLimiter = options.rateLimiter ?? new RateLimiter(options.config.limits ?? {});
     this.health = options.health ?? new HealthTracker(options.config.routing?.healthCooldownMs !== undefined ? { cooldownMs: options.config.routing.healthCooldownMs } : {});
     this.usage = options.usage ?? new MemoryUsageRecorder();
+    this.sessionAffinity = new SessionAffinityTracker(
+      options.config.routing?.sessionAffinityTtlMs,
+      options.config.routing?.sessionAffinityMaxEntries
+    );
+    this.roundRobinSelector = new RoundRobinSelector();
+  }
+
+  getSelectionCursor(deployment: Deployment): number | undefined {
+    if (this.options.config.routing?.strategy === 'round-robin') {
+      return this.roundRobinSelector.getCursor(deployment.modelGroup);
+    }
+    return undefined;
   }
 
   async chat(request: ChatRequest, context: ChatContext): Promise<RoutedChatResult> {
     await this.refreshRegistryIfStale();
     const requestId = context.requestId ?? randomUUID();
-    const deployments = this.selectCandidates(request.model);
+    const deployments = this.selectCandidates(request, context);
     if (deployments.length === 0) {
       throw new RouterError(`No deployment available for model ${request.model}`, { status: 404, code: 'model_not_found', retryable: false });
     }
@@ -92,12 +109,21 @@ export class AiRouter {
           const attempt = this.attempt({ requestId, deployment, status: 'success', retryable: false, latencyMs, ...(usage ? { usage } : {}) });
           attempts.push(attempt);
           this.health.markSuccess(deployment);
+
+          const sessionKey = this.options.config.routing?.sessionAffinity
+            ? extractSessionKey(context.headers ?? {}, request)
+            : undefined;
+          if (sessionKey) {
+            this.sessionAffinity.set(sessionKey, deployment.id);
+          }
+
           await this.recordUsage({ attempt, context, request, deployment, fallbackIndex: attempts.length - 1 });
           return { response: result.response, attempts, deployment };
         } catch (error) {
           const latencyMs = Date.now() - start;
           const retryable = isRetryableError(error);
           const statusCode = getErrorStatus(error);
+          const retryAfterMs = getRetryAfterMs(error);
           const attempt = this.attempt({
             requestId,
             deployment,
@@ -108,7 +134,7 @@ export class AiRouter {
             ...(statusCode !== undefined ? { statusCode } : {})
           });
           attempts.push(attempt);
-          this.health.markFailure(deployment, attempt.error ?? 'unknown error', retryable);
+          this.health.markFailure(deployment, attempt.error ?? 'unknown error', retryable, { statusCode, retryAfterMs });
           await this.recordUsage({ attempt, context, request, deployment, fallbackIndex: attempts.length - 1 });
           lastError = error;
           if (!retryable) {
@@ -128,7 +154,7 @@ export class AiRouter {
     }
   }
 
-  healthSnapshot(): Record<string, unknown> {
+  healthSnapshot(): Record<string, HealthEntry> {
     return this.health.snapshot();
   }
 
@@ -136,11 +162,39 @@ export class AiRouter {
     return this.usage.recent(limit);
   }
 
-  private selectCandidates(model: string): Deployment[] {
-    const deployments = this.options.registry.resolve(model).filter((deployment) => this.providers.has(deployment.providerId));
-    if (this.options.config.routing?.strategy === 'weighted') {
-      return weightedSort(deployments);
+  private selectCandidates(request: ChatRequest, context: ChatContext): Deployment[] {
+    let deployments = this.options.registry.resolve(request.model).filter((deployment) => this.providers.has(deployment.providerId));
+
+    const sessionKey = this.options.config.routing?.sessionAffinity
+      ? extractSessionKey(context.headers ?? {}, request)
+      : undefined;
+
+    let boundDeploymentId: string | undefined = undefined;
+    if (sessionKey) {
+      boundDeploymentId = this.sessionAffinity.get(sessionKey);
     }
+
+    if (boundDeploymentId) {
+      const boundIdx = deployments.findIndex((d) => d.id === boundDeploymentId);
+      if (boundIdx !== -1 && this.health.isAvailable(deployments[boundIdx]!)) {
+        const boundDeployment = deployments[boundIdx]!;
+        deployments.splice(boundIdx, 1);
+        deployments.unshift(boundDeployment);
+        return deployments;
+      }
+    }
+
+    const strategy = this.options.config.routing?.strategy;
+    if (strategy === 'weighted') {
+      deployments = weightedSort(deployments);
+    } else if (strategy === 'round-robin') {
+      deployments = this.roundRobinSelector.select(deployments);
+    } else {
+      // priority or fill-first or default
+    }
+
+    // Session affinity binding happens on success in chat(), not here.
+
     return deployments;
   }
 

@@ -12,7 +12,7 @@ Local OpenAI-compatible router for free and developer-tier AI providers. It disc
 - Dynamic model discovery from provider `/models` endpoints instead of hardcoded model lists.
 - OpenAI-compatible providers: Groq, Cerebras, OpenRouter, NVIDIA NIM, Hugging Face Inference Providers, GitHub Models, SambaNova, Cloudflare Workers AI, OpenCode server, iFlow, LiteLLM, CLIProxyAPI, 9Router, and similar relays.
 - Native Gemini API adapter using `GEMINI_API_KEY`.
-- Priority or weighted routing.
+- Priority, weighted, round-robin, fill-first, and session-affinity routing strategies.
 - Fallback across provider deployments for the same dynamic model ID or configured aliases.
 - Hierarchical limits for global, user/API key, provider, model, and deployment scopes.
 - Passive health cooldown after retryable failures.
@@ -122,7 +122,7 @@ The router estimates prompt tokens before dispatch and records upstream usage wh
 ## Admin Endpoints
 
 - `GET /health`: basic process status.
-- `GET /admin/providers`: provider list and health cooldown state. Requires admin bearer token.
+- `GET /admin/providers`: provider list, health cooldown state, active routing strategies, and deployment cursors/error metrics. Requires admin bearer token.
 - `GET /admin/usage?limit=100`: recent usage events from the configured recorder. Requires admin bearer token.
 
 ## Docker
@@ -152,7 +152,7 @@ Persist `router-state/` if you want usage logs to survive restarts. Rotate `rout
 
 ## Compliance Boundary
 
-Default examples use API keys and officially exposed HTTP/server endpoints. The project intentionally does not scrape OAuth token caches or pool subscription accounts to bypass quotas. If you use Gemini CLI, Codex CLI, Claude Code, Antigravity, CLIProxyAPI, OpenCode, or similar tools as upstreams, keep that local, user-owned, and compliant with each provider's terms.
+Default examples use API keys and officially exposed HTTP/server endpoints, but the project supports operator-authorized token/credential files (e.g. for CLIProxyAPI parity integrations). Multi-account scheduling and pooling are supported, provided they are explicitly configured by the operator and avoid implicit scanning of unrelated system directories or browser storage. If you use Gemini CLI, Codex CLI, Claude Code, Antigravity, CLIProxyAPI, OpenCode, or similar tools as upstreams, keep that local, user-owned, and compliant with each provider's terms.
 
 ## Development
 

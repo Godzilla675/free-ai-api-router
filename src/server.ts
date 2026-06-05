@@ -35,7 +35,36 @@ export function createServer(options: ServerOptions): http.Server {
           return sendJson(response, 401, toOpenAIError(new Error('Unauthorized'), 401).body);
         }
         if (request.method === 'GET' && url.pathname === '/admin/providers') {
-          return sendJson(response, 200, { providers: options.providers.map((provider) => ({ id: provider.id, type: provider.type, priority: provider.priority })), health: router.healthSnapshot() });
+          const seen = new Set<string>();
+          const allDeployments = options.registry.list()
+            .flatMap((group) => group.deployments)
+            .filter((d) => {
+              if (seen.has(d.id)) return false;
+              seen.add(d.id);
+              return true;
+            });
+          const healthSnapshot = router.healthSnapshot();
+          const deployments = allDeployments.map((d) => {
+            const healthEntry = healthSnapshot[d.id];
+            const cursor = router.getSelectionCursor(d);
+            return {
+              id: d.id,
+              cooldownUntil: healthEntry?.cooldownUntil ?? 0,
+              ...(healthEntry?.lastError ? { lastError: healthEntry.lastError } : {}),
+              ...(cursor !== undefined ? { selectionCursor: cursor } : {})
+            };
+          });
+
+          return sendJson(response, 200, {
+            providers: options.providers.map((provider) => ({ id: provider.id, type: provider.type, priority: provider.priority })),
+            health: healthSnapshot,
+            routing: {
+              strategy: options.config.routing?.strategy,
+              sessionAffinity: options.config.routing?.sessionAffinity,
+              sessionAffinityTtlMs: options.config.routing?.sessionAffinityTtlMs
+            },
+            deployments
+          });
         }
         if (request.method === 'GET' && url.pathname === '/admin/usage') {
           return sendJson(response, 200, { data: await router.recentUsage(parseUsageLimit(url.searchParams.get('limit'))) });
@@ -58,7 +87,7 @@ export function createServer(options: ServerOptions): http.Server {
         if (request.method === 'POST' && url.pathname === '/v1/chat/completions') {
           const body = await readJson<ChatRequest>(request, maxBodyBytes);
           validateChatRequest(body);
-          const result = await router.chat(body, { userId: apiKeyHash(request), apiKeyHash: apiKeyHash(request) });
+          const result = await router.chat(body, { userId: apiKeyHash(request), apiKeyHash: apiKeyHash(request), headers: request.headers });
           if (result.response instanceof Response) {
             setDebugHeaders(response, options.config, result);
             response.statusCode = result.response.status;
@@ -77,7 +106,7 @@ export function createServer(options: ServerOptions): http.Server {
           }
           const chatRequest = responsesToChatRequest(body);
           validateChatRequest(chatRequest);
-          const result = await router.chat(chatRequest, { userId: apiKeyHash(request), apiKeyHash: apiKeyHash(request) });
+          const result = await router.chat(chatRequest, { userId: apiKeyHash(request), apiKeyHash: apiKeyHash(request), headers: request.headers });
           if (result.response instanceof Response) {
             setDebugHeaders(response, options.config, result);
             response.statusCode = result.response.status;
