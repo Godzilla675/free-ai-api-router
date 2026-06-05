@@ -1,6 +1,7 @@
 import { AuthStore } from './store.js';
 import type { AuthRecord, RedactedAuthRecord } from './types.js';
 import { redactAuthRecord } from './types.js';
+import type { AuthProviderHandler } from './providers/provider.js';
 
 export interface AuthManagerConfig {
   authDir: string;
@@ -8,6 +9,7 @@ export interface AuthManagerConfig {
 
 export class AuthManager {
   private readonly records = new Map<string, AuthRecord>();
+  private readonly handlers = new Map<string, AuthProviderHandler>();
 
   private constructor(private readonly store: AuthStore) {}
 
@@ -52,5 +54,20 @@ export class AuthManager {
   async delete(id: string): Promise<void> {
     this.records.delete(id);
     await this.store.delete(id);
+  }
+
+  registerProviderHandler(provider: string, handler: AuthProviderHandler): void {
+    this.handlers.set(provider, handler);
+  }
+
+  async refreshDue(now = new Date()): Promise<void> {
+    for (const record of this.records.values()) {
+      if (record.disabled) continue;
+      if (record.status !== 'expired' && (!record.nextRefreshAfter || Date.parse(record.nextRefreshAfter) > now.getTime())) continue;
+      const handler = this.handlers.get(record.provider);
+      if (!handler?.refresh) continue;
+      const refreshed = await handler.refresh(record);
+      await this.upsert(refreshed);
+    }
   }
 }

@@ -78,4 +78,31 @@ describe('AuthManager', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('refreshes records with registered provider handlers', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'free-ai-router-auth-'));
+    try {
+      const manager = await AuthManager.create({ authDir: dir });
+      await manager.upsert({
+        id: 'gemini-1',
+        provider: 'gemini-oauth',
+        status: 'expired',
+        disabled: false,
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+        secrets: { refreshToken: 'refresh' }
+      });
+
+      manager.registerProviderHandler('gemini-oauth', {
+        async refresh(record) {
+          return { ...record, status: 'available', secrets: { accessToken: 'new-access', refreshToken: 'refresh' } };
+        }
+      });
+
+      await manager.refreshDue();
+      expect(manager.get('gemini-1')?.status).toBe('available');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
