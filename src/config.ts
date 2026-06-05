@@ -46,6 +46,7 @@ export function normalizeConfig(config: RouterConfig): RouterConfig {
       port: 8080,
       requestTimeoutMs: 120_000,
       maxBodyBytes: 1_048_576,
+      websocketEnabled: false,
       ...(config.server ?? {})
     },
     routing: {

@@ -99,6 +99,13 @@ export function createServer(options: ServerOptions): http.Server {
           return sendJson(response, 401, toOpenAIError(new Error('Unauthorized'), 401).body);
         }
 
+        if (url.pathname === '/v1/ws') {
+          if (!options.config.server?.websocketEnabled) {
+            return sendJson(response, 404, toOpenAIError(new Error('Not found'), 404).body);
+          }
+          return sendJson(response, 501, toOpenAIError(new RouterError('WebSocket execution is not implemented yet', { status: 501, code: 'not_implemented', retryable: false })).body);
+        }
+
         if (request.method === 'GET' && url.pathname === '/v1/models') {
           await options.registry.refresh();
           return sendJson(response, 200, {

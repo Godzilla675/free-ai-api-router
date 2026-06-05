@@ -286,4 +286,34 @@ describe('HTTP server', () => {
     expect(body.object).toBe('response');
     expect(typeof body.output_text).toBe('string');
   });
+
+  it('returns 501 for websocket endpoint when websocket support is enabled without executor', async () => {
+    const config = {
+      server: { authTokens: ['dev-token'], adminToken: 'admin', websocketEnabled: true },
+      models: [],
+      routing: { strategy: 'priority' }
+    } as unknown as RouterConfig;
+    const registry = createModelRegistry([], config);
+    const baseUrl = await listen(createServer({ providers: [], registry, config }));
+
+    const response = await fetch(`${baseUrl}/v1/ws`, {
+      headers: { authorization: 'Bearer dev-token' }
+    });
+    expect(response.status).toBe(501);
+  });
+
+  it('returns 404 for websocket endpoint when websocket support is disabled', async () => {
+    const config = {
+      server: { authTokens: ['dev-token'], adminToken: 'admin', websocketEnabled: false },
+      models: [],
+      routing: { strategy: 'priority' }
+    } as unknown as RouterConfig;
+    const registry = createModelRegistry([], config);
+    const baseUrl = await listen(createServer({ providers: [], registry, config }));
+
+    const response = await fetch(`${baseUrl}/v1/ws`, {
+      headers: { authorization: 'Bearer dev-token' }
+    });
+    expect(response.status).toBe(404);
+  });
 });

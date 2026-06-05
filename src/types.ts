@@ -21,6 +21,7 @@ export interface ServerConfig {
   adminToken?: string;
   requestTimeoutMs?: number;
   maxBodyBytes?: number;
+  websocketEnabled?: boolean;
 }
 
 export interface RoutingConfig {
