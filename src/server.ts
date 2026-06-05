@@ -40,6 +40,13 @@ export function createServer(options: ServerOptions): http.Server {
         if (request.method === 'GET' && url.pathname === '/admin/auth') {
           return sendJson(response, 200, { data: options.authManager?.listRedacted() ?? [] });
         }
+        if (request.method === 'GET' && url.pathname === '/admin/operations') {
+          return sendJson(response, 200, {
+            routing: options.config.routing ?? {},
+            health: router.healthSnapshot(),
+            usage: await router.recentUsage(20)
+          });
+        }
         const authMatch = /^\/admin\/auth\/([^/]+)$/.exec(url.pathname);
         if (authMatch && request.method === 'PATCH') {
           if (!options.authManager) return sendJson(response, 404, toOpenAIError(new Error('Not found'), 404).body);

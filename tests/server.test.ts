@@ -316,4 +316,24 @@ describe('HTTP server', () => {
     });
     expect(response.status).toBe(404);
   });
+
+  it('returns operations snapshot from admin API', async () => {
+    const config = {
+      server: { authTokens: ['dev-token'], adminToken: 'admin-token' },
+      models: [],
+      routing: { strategy: 'priority' }
+    } as unknown as RouterConfig;
+    const registry = createModelRegistry([], config);
+    const baseUrl = await listen(createServer({ providers: [], registry, config }));
+
+    const response = await fetch(`${baseUrl}/admin/operations`, {
+      headers: { authorization: 'Bearer admin-token' }
+    });
+    const body = await response.json() as { routing: unknown; health: unknown; usage: unknown };
+
+    expect(response.status).toBe(200);
+    expect(body.routing).toBeDefined();
+    expect(body.health).toBeDefined();
+    expect(body.usage).toBeDefined();
+  });
 });
