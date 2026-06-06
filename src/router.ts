@@ -5,7 +5,7 @@ import { HealthTracker } from './health.js';
 import type { ModelRegistry } from './model-registry.js';
 import { RateLimiter } from './rate-limit.js';
 import { MemoryUsageRecorder, type UsageRecorder } from './usage.js';
-import type { AttemptRecord, ChatContext, ChatRequest, Deployment, ProviderAdapter, RoutedChatResult, RouterConfig, UsageTokens } from './types.js';
+import type { AttemptRecord, ChatContext, ChatRequest, Deployment, ProviderAdapter, RoutedChatResult, RouterConfig, UsageTokens, ImageRequest, ProviderImageResult, RoutedImageResult } from './types.js';
 import { SessionAffinityTracker, extractSessionKey } from './scheduler/session-affinity.js';
 import { RoundRobinSelector } from './scheduler/selector.js';
 
@@ -136,6 +136,114 @@ export class AiRouter {
           attempts.push(attempt);
           this.health.markFailure(deployment, attempt.error ?? 'unknown error', retryable, { statusCode, retryAfterMs });
           await this.recordUsage({ attempt, context, request, deployment, fallbackIndex: attempts.length - 1 });
+          lastError = error;
+          if (!retryable) {
+            throw error;
+          }
+        } finally {
+          reservation.release();
+        }
+      }
+
+      if (lastError) {
+        throw lastError;
+      }
+      throw new RouterError(`No healthy deployment available for model ${request.model}`, { status: 503, code: 'no_healthy_deployment' });
+    } finally {
+      clientReservation.release();
+    }
+  }
+
+  async imageGenerate(request: ImageRequest, context: ChatContext): Promise<RoutedImageResult> {
+    if (!request.model) {
+      throw new RouterError('Model is required for image generation', { status: 400, code: 'invalid_request', retryable: false });
+    }
+    await this.refreshRegistryIfStale();
+    const requestId = context.requestId ?? randomUUID();
+    const deployments = this.selectCandidates(request as unknown as ChatRequest, context);
+    if (deployments.length === 0) {
+      throw new RouterError(`No deployment available for model ${request.model}`, { status: 404, code: 'model_not_found', retryable: false });
+    }
+
+    const attempts: AttemptRecord[] = [];
+    const maxAttempts = Math.max(1, Math.min(deployments.length, (this.options.config.routing?.maxFallbacks ?? 3) + 1));
+    let lastError: unknown;
+    const estimatedTokens = 1;
+    const clientReservation = this.rateLimiter.reserve({
+      userId: context.userId,
+      modelId: deployments[0]?.modelGroup ?? request.model,
+      providerId: 'client',
+      deploymentId: 'client',
+      estimatedTokens,
+      scopeTypes: ['global', 'user', 'model']
+    });
+    if (!clientReservation.allowed) {
+      throw new RouterError(`Rate limit exceeded for ${clientReservation.scope}`, {
+        status: 429,
+        code: 'rate_limit_exceeded',
+        retryable: true,
+        details: { retryAfterMs: clientReservation.retryAfterMs }
+      });
+    }
+
+    try {
+      for (const deployment of deployments.slice(0, maxAttempts)) {
+        const provider = this.providers.get(deployment.providerId);
+        if (!provider || !this.health.isAvailable(deployment)) {
+          continue;
+        }
+
+        if (typeof provider.imageGenerate !== 'function') {
+          lastError = new RouterError(`Provider ${provider.id} does not support image generation`, { status: 501, code: 'not_implemented', retryable: false });
+          continue;
+        }
+
+        const reservation = this.rateLimiter.reserve({
+          userId: context.userId,
+          modelId: deployment.modelGroup,
+          providerId: deployment.providerId,
+          deploymentId: deployment.id,
+          estimatedTokens,
+          scopeTypes: ['provider', 'deployment']
+        });
+        if (!reservation.allowed) {
+          lastError = new RouterError(`Rate limit exceeded for ${reservation.scope}`, {
+            status: 429,
+            code: 'rate_limit_exceeded',
+            retryable: true,
+            details: { retryAfterMs: reservation.retryAfterMs }
+          });
+          continue;
+        }
+
+        const start = Date.now();
+        const upstreamRequest = { ...request, model: deployment.upstreamModel };
+        try {
+          const result = await provider.imageGenerate(upstreamRequest, deployment);
+          const latencyMs = Date.now() - start;
+          const attempt = this.attempt({ requestId, deployment, status: 'success', retryable: false, latencyMs });
+          attempts.push(attempt);
+          this.health.markSuccess(deployment);
+
+          await this.recordUsage({ attempt, context, request: request as unknown as ChatRequest, deployment, fallbackIndex: attempts.length - 1 });
+          return { response: result.response, attempts, deployment };
+        } catch (error) {
+          const latencyMs = Date.now() - start;
+          const retryable = isRetryableError(error);
+          const statusCode = getErrorStatus(error);
+          const retryAfterMs = getRetryAfterMs(error);
+          const attempt = this.attempt({
+            requestId,
+            deployment,
+            status: 'error',
+            retryable,
+            latencyMs,
+            error: error instanceof Error ? error.message : String(error),
+            ...(statusCode !== undefined ? { statusCode } : {})
+          });
+          attempts.push(attempt);
+          this.health.markFailure(deployment, attempt.error ?? 'unknown error', retryable, { statusCode, retryAfterMs });
+          await this.recordUsage({ attempt, context, request: request as unknown as ChatRequest, deployment, fallbackIndex: attempts.length - 1 });
           lastError = error;
           if (!retryable) {
             throw error;

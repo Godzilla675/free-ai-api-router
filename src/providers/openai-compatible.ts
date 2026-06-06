@@ -1,5 +1,5 @@
 import { RouterError } from '../errors.js';
-import type { ChatRequest, ModelInfo, OpenAIChatResponse, ProviderAdapter, ProviderChatResult, ProviderConfig } from '../types.js';
+import type { ChatRequest, ImageRequest, ModelInfo, OpenAIChatResponse, ProviderAdapter, ProviderChatResult, ProviderConfig, ProviderImageResult } from '../types.js';
 
 export class OpenAICompatibleProvider implements ProviderAdapter {
   readonly id: string;
@@ -10,6 +10,7 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
   private readonly apiKey: string | undefined;
   private readonly modelsPath: string;
   private readonly chatPath: string;
+  private readonly imagesPath: string;
   private readonly headers: Record<string, string>;
   private readonly timeoutMs: number;
   private readonly modelFilter: string | undefined;
@@ -25,6 +26,7 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
     this.apiKey = config.apiKey;
     this.modelsPath = config.modelsPath ?? '/models';
     this.chatPath = config.chatPath ?? '/chat/completions';
+    this.imagesPath = config.imagesPath ?? '/images/generations';
     this.headers = config.headers ?? {};
     this.timeoutMs = config.timeoutMs ?? 120_000;
     this.modelFilter = config.modelFilter;
@@ -61,6 +63,15 @@ export class OpenAICompatibleProvider implements ProviderAdapter {
       response: json,
       usage: usageTokens(json.usage?.prompt_tokens, json.usage?.completion_tokens, json.usage?.total_tokens)
     };
+  }
+
+  async imageGenerate(request: ImageRequest): Promise<ProviderImageResult> {
+    const response = await this.fetchRaw(`${this.baseUrl}${this.imagesPath}`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+      headers: { 'content-type': 'application/json' }
+    });
+    return { response };
   }
 
   private parseModel(model: unknown): ModelInfo | undefined {

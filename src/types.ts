@@ -56,6 +56,7 @@ export interface ProviderConfig {
   headers?: Record<string, string>;
   timeoutMs?: number;
   responsesPath?: string;
+  imagesPath?: string;
 }
 
 export interface ConfiguredRoute {
@@ -173,6 +174,16 @@ export interface ProviderChatResult {
   streamed?: boolean;
 }
 
+export interface ImageRequest {
+  prompt: string;
+  model?: string;
+  [key: string]: unknown;
+}
+
+export interface ProviderImageResult {
+  response: Response;
+}
+
 export interface ProviderAdapter {
   id: string;
   type: string;
@@ -180,6 +191,7 @@ export interface ProviderAdapter {
   weight?: number;
   listModels(): Promise<ModelInfo[]>;
   chat(request: ChatRequest, deployment?: Deployment): Promise<ProviderChatResult>;
+  imageGenerate?(request: ImageRequest, deployment?: Deployment): Promise<ProviderImageResult>;
 }
 
 export interface ChatContext {
@@ -204,6 +216,12 @@ export interface AttemptRecord {
 
 export interface RoutedChatResult {
   response: OpenAIChatResponse | Response;
+  attempts: AttemptRecord[];
+  deployment: Deployment;
+}
+
+export interface RoutedImageResult {
+  response: Response;
   attempts: AttemptRecord[];
   deployment: Deployment;
 }

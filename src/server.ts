@@ -2,7 +2,7 @@ import http from 'node:http';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { AiRouter } from './router.js';
 import { getRetryAfterMs, RouterError, toOpenAIError } from './errors.js';
-import type { ChatRequest, ProviderAdapter, RouterConfig } from './types.js';
+import type { ChatRequest, ImageRequest, ProviderAdapter, RouterConfig } from './types.js';
 import type { ModelRegistry } from './model-registry.js';
 import { JsonlUsageRecorder } from './usage.js';
 import type { AuthManager } from './auth/manager.js';
@@ -136,6 +136,17 @@ export function createServer(options: ServerOptions): http.Server {
           return sendJson(response, 200, result.response);
         }
 
+        if (request.method === 'POST' && url.pathname === '/v1/images/generations') {
+          const body = await readJson<ImageRequest>(request, maxBodyBytes);
+          validateImageRequest(body);
+          const result = await router.imageGenerate(body, { userId: apiKeyHash(request), apiKeyHash: apiKeyHash(request), headers: request.headers });
+          setDebugHeaders(response, options.config, result);
+          response.statusCode = result.response.status;
+          copyHeaders(result.response.headers, response);
+          await pipeWebResponse(result.response, response, request);
+          return;
+        }
+
         if (request.method === 'POST' && url.pathname === '/v1/responses') {
           const body = await readJson<Record<string, unknown>>(request, maxBodyBytes);
           if (body.stream === true) {
@@ -267,6 +278,8 @@ async function pipeWebResponse(webResponse: Response, nodeResponse: http.ServerR
       nodeResponse.end();
     }
   } finally {
+    nodeRequest.off('aborted', cancel);
+    nodeResponse.off('close', cancel);
     reader.releaseLock();
   }
 }
@@ -329,4 +342,22 @@ function chatToResponses(chat: { id: string; model: string; choices: Array<{ mes
     output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: typeof content === 'string' ? content : JSON.stringify(content) }] }],
     usage: chat.usage
   };
+}
+
+function validateImageRequest(body: ImageRequest): void {
+  if (!body || typeof body !== 'object') {
+    throw new RouterError('Request body must be a JSON object', { status: 400, code: 'invalid_request', retryable: false });
+  }
+  if (typeof body.prompt !== 'string' || body.prompt.trim().length === 0) {
+    throw new RouterError('prompt must be a non-empty string', { status: 400, code: 'invalid_request', retryable: false });
+  }
+  if (body.model !== undefined && (typeof body.model !== 'string' || body.model.trim().length === 0)) {
+    throw new RouterError('model must be a non-empty string', { status: 400, code: 'invalid_request', retryable: false });
+  }
+  for (const field of ['n'] as const) {
+    const value = body[field];
+    if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) {
+      throw new RouterError(`${field} must be a finite number`, { status: 400, code: 'invalid_request', retryable: false });
+    }
+  }
 }

@@ -17,6 +17,7 @@ describe('config.example.json', () => {
       'CLOUDFLARE_API_TOKEN',
       'CLOUDFLARE_WORKERS_AI_BASE_URL',
       'IFLOW_API_KEY',
+      'AIHUBMIX_API_KEY',
       'OPENAI_API_KEY',
       'OPENAI_RESPONSES_BASE_URL'
     ]);
@@ -33,6 +34,7 @@ describe('config.example.json', () => {
       CLOUDFLARE_API_TOKEN: 'cloudflare',
       CLOUDFLARE_WORKERS_AI_BASE_URL: 'https://api.cloudflare.com/client/v4/accounts/example/ai',
       IFLOW_API_KEY: 'iflow',
+      AIHUBMIX_API_KEY: 'aihubmix',
       OPENAI_API_KEY: 'openai-test',
       OPENAI_RESPONSES_BASE_URL: 'https://api.openai.com/v1'
     });
@@ -43,7 +45,8 @@ describe('config.example.json', () => {
         'huggingface',
         'github-models',
         'sambanova',
-        'cloudflare-workers-ai'
+        'cloudflare-workers-ai',
+        'aihubmix'
       ]));
       expect(config.providers?.find((provider) => provider.id === 'cloudflare-workers-ai')).toMatchObject({
         baseUrl: 'https://api.cloudflare.com/client/v4/accounts/example/ai',

@@ -135,6 +135,16 @@
       "optional": true
     },
     {
+      "id": "aihubmix",
+      "type": "openai-compatible",
+      "baseUrl": "https://aihubmix.com/v1",
+      "apiKeyEnv": "AIHUBMIX_API_KEY",
+      "modelsPath": "/models",
+      "chatPath": "/chat/completions",
+      "priority": 59,
+      "optional": true
+    },
+    {
       "id": "iflow",
       "type": "openai-compatible",
       "baseUrl": "https://apis.iflow.cn/v1",
