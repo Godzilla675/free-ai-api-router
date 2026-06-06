@@ -196,9 +196,9 @@ function authorized(request: http.IncomingMessage, tokens: string[]): boolean {
 }
 
 function safeEqual(a: string, b: string): boolean {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-  return left.length === right.length && timingSafeEqual(left, right);
+  const left = createHash("sha256").update(a).digest();
+  const right = createHash("sha256").update(b).digest();
+  return timingSafeEqual(left, right);
 }
 
 function apiKeyHash(request: http.IncomingMessage): string {
