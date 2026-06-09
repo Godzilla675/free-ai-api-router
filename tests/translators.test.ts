@@ -73,6 +73,30 @@ describe('translator framework', () => {
 
     expect(result.model).toBe('gemini-3-pro');
     expect(result.choices[0]?.message.content).toBe('hi');
+    expect(result.usage?.prompt_tokens).toBe(1);
+    expect(result.usage?.completion_tokens).toBe(2);
     expect(result.usage?.total_tokens).toBe(3);
+  });
+
+  it('handles Gemini response with missing usageMetadata', () => {
+    const result = geminiToOpenAIResponse({
+      candidates: [{ content: { parts: [{ text: 'hi' }] }, finishReason: 'STOP' }]
+    }, 'gemini-3-pro');
+
+    expect(result.model).toBe('gemini-3-pro');
+    expect(result.choices[0]?.message.content).toBe('hi');
+    expect(result.usage).toBeUndefined();
+  });
+
+  it('handles Gemini response with partial usageMetadata', () => {
+    const result = geminiToOpenAIResponse({
+      candidates: [{ content: { parts: [{ text: 'hi' }] }, finishReason: 'STOP' }],
+      usageMetadata: { promptTokenCount: 10 }
+    }, 'gemini-3-pro');
+
+    expect(result.usage).toBeDefined();
+    expect(result.usage?.prompt_tokens).toBe(10);
+    expect(result.usage?.completion_tokens).toBeUndefined();
+    expect(result.usage?.total_tokens).toBeUndefined();
   });
 });
