@@ -144,4 +144,105 @@ describe('OpenAI-compatible provider', () => {
       details: { retryAfterMs: 2000 }
     });
   });
+
+  it('parses GitHub Models catalog response with context_window field', async () => {
+    const baseUrl = await fakeServer((_request, response) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify([
+        {
+          id: 'openai/gpt-4o',
+          name: 'GPT-4o',
+          context_window: 128000,
+          capabilities: { chat: true }
+        },
+        {
+          id: 'Meta-Llama-3.3-70B-Instruct',
+          name: 'Llama 3.3 70B',
+          context_window: 131072,
+          capabilities: { chat: true }
+        }
+      ]));
+    });
+    const provider = new OpenAICompatibleProvider({
+      id: 'github-models',
+      type: 'openai-compatible',
+      baseUrl,
+      apiKey: 'ghp_test123',
+      modelsPath: '/catalog/models',
+      chatPath: '/inference/chat/completions',
+      headers: {
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28'
+      }
+    });
+
+    const models = await provider.listModels();
+    expect(models).toHaveLength(2);
+    expect(models[0]).toMatchObject({ id: 'openai/gpt-4o', name: 'GPT-4o', contextWindow: 128000 });
+    expect(models[1]).toMatchObject({ id: 'Meta-Llama-3.3-70B-Instruct', name: 'Llama 3.3 70B', contextWindow: 131072 });
+  });
+
+  it('sends chat request to GitHub Models /inference/chat/completions', async () => {
+    let receivedPath = '';
+    let receivedBody = '';
+    const baseUrl = await fakeServer((request, response) => {
+      receivedPath = request.url ?? '';
+      let body = '';
+      request.on('data', (chunk) => { body += chunk.toString('utf8'); });
+      request.on('end', () => {
+        receivedBody = body;
+        response.setHeader('content-type', 'application/json');
+        response.end(JSON.stringify({
+          choices: [{ message: { role: 'assistant', content: 'Hello from GitHub Models!' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+        }));
+      });
+    });
+    const provider = new OpenAICompatibleProvider({
+      id: 'github-models',
+      type: 'openai-compatible',
+      baseUrl,
+      apiKey: 'ghp_test123',
+      chatPath: '/inference/chat/completions'
+    });
+
+    const result = await provider.chat({
+      model: 'openai/gpt-4o',
+      messages: [{ role: 'user', content: 'Hi' }]
+    });
+
+    expect(receivedPath).toBe('/v1/inference/chat/completions');
+    expect(JSON.parse(receivedBody).model).toBe('openai/gpt-4o');
+    expect((result.response as OpenAIChatResponse).choices[0]?.message.content).toBe('Hello from GitHub Models!');
+    expect(result.usage).toMatchObject({ promptTokens: 10, completionTokens: 5, totalTokens: 15 });
+  });
+
+  it('sends Bearer token and custom headers for GitHub Models', async () => {
+    let receivedHeaders: Record<string, string | string[] | undefined> = {};
+    const baseUrl = await fakeServer((request, response) => {
+      receivedHeaders = request.headers;
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ choices: [] }));
+    });
+    const provider = new OpenAICompatibleProvider({
+      id: 'github-models',
+      type: 'openai-compatible',
+      baseUrl,
+      apiKey: 'ghp_secret_token_123',
+      chatPath: '/inference/chat/completions',
+      headers: {
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28'
+      }
+    });
+
+    await provider.chat({
+      model: 'openai/gpt-4o',
+      messages: [{ role: 'user', content: 'Hi' }]
+    });
+
+    expect(receivedHeaders['authorization']).toBe('Bearer ghp_secret_token_123');
+    expect(receivedHeaders['accept']).toBe('application/vnd.github+json');
+    expect(receivedHeaders['x-github-api-version']).toBe('2022-11-28');
+  });
 });

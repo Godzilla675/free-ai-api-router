@@ -38,7 +38,7 @@ $env:NVIDIA_API_KEY = "your_key"
 $env:GEMINI_API_KEY = "your_key"
 $env:OPENCODE_SERVER_PASSWORD = "your_local_opencode_server_password"
 $env:HF_TOKEN = "your_huggingface_token"
-$env:GITHUB_TOKEN = "your_github_token_with_models_read"
+$env:GITHUB_TOKEN = "ghp_your_token_here"  # Models:read scope required
 $env:SAMBANOVA_API_KEY = "your_key"
 $env:CLOUDFLARE_API_TOKEN = "your_cloudflare_token"
 $env:CLOUDFLARE_WORKERS_AI_BASE_URL = "https://api.cloudflare.com/client/v4/accounts/your_account_id/ai"
@@ -86,12 +86,44 @@ Common free/developer-tier candidates:
 - `GEMINI_API_KEY`: Official Gemini API key path.
 - `OPENCODE_SERVER_PASSWORD`: Local OpenCode server or Zen-compatible endpoint if exposed as `/v1`.
 - `HF_TOKEN`: Hugging Face Inference Providers router through `https://router.huggingface.co/v1`; free monthly credits are account-level.
-- `GITHUB_TOKEN`: GitHub Models free public-preview API usage; token needs models access.
+- `GITHUB_TOKEN`: GitHub Models free API access to models from OpenAI, Meta, DeepSeek, and others. Token needs `models: read` scope. See [GitHub Models Setup](#github-models-setup) below.
 - `SAMBANOVA_API_KEY`: SambaNova Cloud OpenAI-compatible API with documented free/developer tiers.
 - `CLOUDFLARE_API_TOKEN` plus `CLOUDFLARE_WORKERS_AI_BASE_URL`: Cloudflare Workers AI account API base, for example `https://api.cloudflare.com/client/v4/accounts/<account_id>/ai`; Workers AI has a daily free allocation.
 - `AIHUBMIX_API_KEY`: OpenAI-compatible API from aihubmix.com with priority 59, supports chat completions and image generation.
 - `IFLOW_API_KEY`: Optional because iFlow CLI/API availability has changed; verify your account endpoint first.
 - `OPENAI_API_KEY`: OpenAI Responses API or Codex. Set `OPENAI_API_KEY` and enable the optional `openai-responses` or `codex` provider. The provider sends chat requests through the Responses API and normalizes non-streaming responses to chat-completion shape.
+
+### GitHub Models Setup
+
+GitHub Models provides free access to models from OpenAI, Meta, DeepSeek, and others. All requests are free with per-model rate limits (10-15 RPM, 50-150 RPD depending on the model).
+
+1. Go to [github.com/marketplace/models](https://github.com/marketplace/models)
+2. Generate a personal access token with **`models: read`** scope at [github.com/settings/tokens](https://github.com/settings/tokens)
+3. Set the environment variable:
+   ```powershell
+   $env:GITHUB_TOKEN = "ghp_your_token_here"
+   ```
+4. Ensure the provider is in your `config.json`:
+   ```json
+   {
+     "id": "github-models",
+     "type": "openai-compatible",
+     "baseUrl": "https://models.github.ai",
+     "apiKeyEnv": "GITHUB_TOKEN",
+     "modelsPath": "/catalog/models",
+     "chatPath": "/inference/chat/completions",
+     "priority": 56,
+     "optional": true,
+     "headers": {
+       "Accept": "application/vnd.github+json",
+       "X-GitHub-Api-Version": "2022-11-28"
+     }
+   }
+   ```
+
+**Available models include:** `openai/gpt-4.1`, `openai/gpt-4.1-mini`, `openai/gpt-4o`, `Meta-Llama-3.3-70B-Instruct`, `DeepSeek-R1`, `Phi-4`, and more.
+
+**Rate limits:** Per-model limits (e.g., `gpt-4o` is 10 RPM / 50 RPD). GitHub returns `429` with `retry-after` headers when limits are hit.
 
 ## Fallback Rules
 
