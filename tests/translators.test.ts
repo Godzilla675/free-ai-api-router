@@ -48,6 +48,24 @@ describe('translator framework', () => {
     expect(result.usage?.prompt_tokens).toBe(1);
   });
 
+  it('maps generation config properties (max_tokens, temperature, top_p) to Gemini request', () => {
+    const result = openAIToGeminiRequest({
+      model: 'gemini-3-pro',
+      messages: [
+        { role: 'user', content: 'hello' }
+      ],
+      max_tokens: 150,
+      temperature: 0.7,
+      top_p: 0.9
+    });
+
+    expect(result.generationConfig).toEqual({
+      maxOutputTokens: 150,
+      temperature: 0.7,
+      topP: 0.9
+    });
+  });
+
   it('translates OpenAI chat request to Gemini generateContent request', () => {
     const result = openAIToGeminiRequest({
       model: 'gemini-3-pro',
