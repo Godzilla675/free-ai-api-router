@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isRetryableError, RouterError, getErrorStatus, getRetryAfterMs, toOpenAIError } from '../src/errors';
+import { isRetryableError, RouterError, getErrorStatus, getRetryAfterMs, toOpenAIError } from '../src/errors.js';
 
 describe('isRetryableError', () => {
   it('should return true if error is a RouterError with retryable=true', () => {
