@@ -16,9 +16,16 @@ export function createModelRegistry(providers: ProviderAdapter[], config: Router
     const nextAliases = new Map<string, string>();
     let successfulProviders = 0;
 
-    for (const provider of providers) {
-      try {
+    const results = await Promise.allSettled(
+      providers.map(async (provider) => {
         const models = await provider.listModels();
+        return { provider, models };
+      })
+    );
+
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        const { provider, models } = result.value;
         successfulProviders += 1;
         for (const model of models) {
           const group = ensureGroup(nextGroups, model.id);
@@ -33,7 +40,7 @@ export function createModelRegistry(providers: ProviderAdapter[], config: Router
             metadata: model
           });
         }
-      } catch {
+      } else {
         // Keep the last successful snapshot if every provider refresh fails.
       }
     }

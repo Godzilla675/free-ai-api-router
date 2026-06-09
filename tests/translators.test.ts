@@ -48,6 +48,24 @@ describe('translator framework', () => {
     expect(result.usage?.prompt_tokens).toBe(1);
   });
 
+  it('maps generation config properties (max_tokens, temperature, top_p) to Gemini request', () => {
+    const result = openAIToGeminiRequest({
+      model: 'gemini-3-pro',
+      messages: [
+        { role: 'user', content: 'hello' }
+      ],
+      max_tokens: 150,
+      temperature: 0.7,
+      top_p: 0.9
+    });
+
+    expect(result.generationConfig).toEqual({
+      maxOutputTokens: 150,
+      temperature: 0.7,
+      topP: 0.9
+    });
+  });
+
   it('translates OpenAI chat request to Gemini generateContent request', () => {
     const result = openAIToGeminiRequest({
       model: 'gemini-3-pro',
@@ -73,6 +91,30 @@ describe('translator framework', () => {
 
     expect(result.model).toBe('gemini-3-pro');
     expect(result.choices[0]?.message.content).toBe('hi');
+    expect(result.usage?.prompt_tokens).toBe(1);
+    expect(result.usage?.completion_tokens).toBe(2);
     expect(result.usage?.total_tokens).toBe(3);
+  });
+
+  it('handles Gemini response with missing usageMetadata', () => {
+    const result = geminiToOpenAIResponse({
+      candidates: [{ content: { parts: [{ text: 'hi' }] }, finishReason: 'STOP' }]
+    }, 'gemini-3-pro');
+
+    expect(result.model).toBe('gemini-3-pro');
+    expect(result.choices[0]?.message.content).toBe('hi');
+    expect(result.usage).toBeUndefined();
+  });
+
+  it('handles Gemini response with partial usageMetadata', () => {
+    const result = geminiToOpenAIResponse({
+      candidates: [{ content: { parts: [{ text: 'hi' }] }, finishReason: 'STOP' }],
+      usageMetadata: { promptTokenCount: 10 }
+    }, 'gemini-3-pro');
+
+    expect(result.usage).toBeDefined();
+    expect(result.usage?.prompt_tokens).toBe(10);
+    expect(result.usage?.completion_tokens).toBeUndefined();
+    expect(result.usage?.total_tokens).toBeUndefined();
   });
 });

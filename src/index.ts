@@ -4,6 +4,7 @@ import { createModelRegistry } from './model-registry.js';
 import { createProviders } from './providers/factory.js';
 import { createServer } from './server.js';
 import { AuthManager } from './auth/manager.js';
+import { logger } from './logger.js';
 
 
 async function main(): Promise<void> {
@@ -17,11 +18,11 @@ async function main(): Promise<void> {
   // Start background auth refresh loop
   const refreshIntervalMs = config.auth?.refreshIntervalMs ?? 60_000;
   authManager.refreshDue().catch((err) => {
-    console.error('Failed to run initial auth refresh check:', err instanceof Error ? err.message : err);
+    logger.error('Failed to run initial auth refresh check', err);
   });
   const refreshTimer = setInterval(() => {
     authManager.refreshDue().catch((err) => {
-      console.error('Failed to refresh credentials in background:', err instanceof Error ? err.message : err);
+      logger.error('Failed to refresh credentials in background', err);
     });
   }, refreshIntervalMs);
   refreshTimer.unref();
@@ -30,7 +31,7 @@ async function main(): Promise<void> {
   const host = config.server?.host ?? '127.0.0.1';
   const port = config.server?.port ?? 8080;
   server.listen(port, host, () => {
-    console.log(`Free AI API Router listening on http://${host}:${port}`);
+    logger.info(`Free AI API Router listening on http://${host}:${port}`);
   });
 }
 
@@ -40,6 +41,6 @@ function getArg(name: string): string | undefined {
 }
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
+  logger.error('Fatal error during startup', error);
   process.exit(1);
 });
