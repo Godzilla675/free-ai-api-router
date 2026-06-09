@@ -24,12 +24,19 @@ export class JsonlUsageRecorder implements UsageRecorder {
     }
     try {
       const content = await readFile(this.path, 'utf8');
-      return content
-        .trim()
-        .split('\n')
-        .filter(Boolean)
-        .slice(-limit)
-        .map((line) => JSON.parse(line) as UsageEvent);
+      const lines = content.trim().split('\n').filter(Boolean).slice(-limit);
+      const usage: UsageEvent[] = [];
+      for (const line of lines) {
+        try {
+          const parsed = JSON.parse(line);
+          if (parsed && typeof parsed === 'object') {
+            usage.push(parsed);
+          }
+        } catch (e) {
+          console.warn('Failed to parse usage line:', e);
+        }
+      }
+      return usage;
     } catch (error) {
       if (error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
         return [];
