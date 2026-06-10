@@ -63,15 +63,20 @@ export class AuthManager {
   }
 
   async refreshDue(now = new Date()): Promise<void> {
-    const promises = Array.from(this.records.values()).map(async (record) => {
-      if (record.disabled) return;
-      if (record.status !== 'expired' && (!record.nextRefreshAfter || Date.parse(record.nextRefreshAfter) > now.getTime())) return;
-      const handler = this.handlers.get(record.provider);
-      if (!handler?.refresh) return;
+    const promises: Promise<void>[] = [];
 
-      const refreshed = await handler.refresh(record);
-      await this.upsert(refreshed);
-    });
+    for (const record of this.records.values()) {
+      if (record.disabled) continue;
+      if (record.status !== 'expired' && (!record.nextRefreshAfter || Date.parse(record.nextRefreshAfter) > now.getTime())) continue;
+
+      const handler = this.handlers.get(record.provider);
+      if (!handler || !handler.refresh) continue;
+
+      promises.push((async () => {
+        const refreshed = await handler.refresh!(record);
+        await this.upsert(refreshed);
+      })());
+    }
 
     await Promise.all(promises);
   }
