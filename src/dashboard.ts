@@ -60,6 +60,10 @@ export class DashboardTui {
   }
 
   private exit() {
+    if (process.stdin.setRawMode) {
+      process.stdin.setRawMode(false);
+    }
+    process.stdin.pause();
     process.stdout.write(`${ESC}[?25h`); // Show cursor
     process.stdout.write(`${ESC}[2J${ESC}[H`);
     process.exit(0);
@@ -114,8 +118,8 @@ export class DashboardTui {
 
     buffer.push(COLORS.blue + formatTuiLine(` ⌨ Arrow Keys: Navigate | [q] Quit`, cols) + RESET);
 
-    // Write buffer in one go
-    process.stdout.write(`${ESC}[H` + buffer.join('\n'));
+    // Write buffer in one go with screen clear to avoid resize garbage
+    process.stdout.write(`${ESC}[2J${ESC}[H` + buffer.join('\n'));
   }
 }
 
