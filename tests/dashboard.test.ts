@@ -307,12 +307,6 @@ describe('DashboardTui provider management', () => {
 
     // Type priority
     (tui as any).handleKeypress('3', { name: '3' });
-    expect((tui as any).wizard.priority).toBe('13'); // default '1' + '3' = '13' (let's check)
-
-    // Backspace priority
-    (tui as any).handleKeypress('', { name: 'backspace' });
-    (tui as any).handleKeypress('', { name: 'backspace' }); // now empty
-    (tui as any).handleKeypress('3', { name: '3' }); // now '3'
     expect((tui as any).wizard.priority).toBe('3');
 
     // Advance to weight
@@ -320,7 +314,6 @@ describe('DashboardTui provider management', () => {
     expect((tui as any).wizard.step).toBe('weight');
 
     // Type weight
-    (tui as any).handleKeypress('', { name: 'backspace' }); // clear default
     (tui as any).handleKeypress('2', { name: '2' });
     expect((tui as any).wizard.weight).toBe('2');
 
@@ -337,6 +330,90 @@ describe('DashboardTui provider management', () => {
     expect(added.apiKey).toBe('abc');
     expect(added.priority).toBe(3);
     expect(added.weight).toBe(2);
+  });
+
+  it('wizard exits and discards duplicate provider id', () => {
+    const tui = new DashboardTui(tempConfigPath);
+    const state = (tui as any).state;
+    state.activeTab = 'providers';
+
+    // Start wizard
+    (tui as any).handleKey('a');
+    expect((tui as any).wizard.step).toBe('id');
+
+    // Type duplicate id: 'openai-test'
+    for (const c of 'openai-test') {
+      (tui as any).handleKeypress(c, { name: c });
+    }
+    expect((tui as any).wizard.id).toBe('openai-test');
+
+    // Attempt to advance (should detect duplicate and exit wizard)
+    (tui as any).handleKeypress('', { name: 'enter' });
+    expect((tui as any).wizard.step).toBe('none');
+  });
+
+  it('wizard exits and discards invalid priority or weight', () => {
+    const tui = new DashboardTui(tempConfigPath);
+    const state = (tui as any).state;
+    state.activeTab = 'providers';
+
+    // 1. Test invalid priority
+    (tui as any).handleKey('a');
+    (tui as any).handleKeypress('u', { name: 'u' }); // ID
+    (tui as any).handleKeypress('', { name: 'enter' }); // to type
+    (tui as any).handleKeypress('', { name: 'enter' }); // to baseUrl
+    (tui as any).handleKeypress('', { name: 'enter' }); // to apiKey
+    (tui as any).handleKeypress('', { name: 'enter' }); // to priority
+    (tui as any).handleKeypress('a', { name: 'a' }); // invalid priority
+    (tui as any).handleKeypress('', { name: 'enter' }); // to weight
+    (tui as any).handleKeypress('', { name: 'enter' }); // to finish -> should discard
+    expect((tui as any).wizard.step).toBe('none');
+
+    // Check config (no provider 'u' should be added)
+    let savedConfig = JSON.parse(fs.readFileSync(tempConfigPath, 'utf8'));
+    expect(savedConfig.providers.find((p: any) => p.id === 'u')).toBeUndefined();
+
+    // 2. Test invalid weight
+    (tui as any).handleKey('a');
+    (tui as any).handleKeypress('v', { name: 'v' }); // ID
+    (tui as any).handleKeypress('', { name: 'enter' }); // to type
+    (tui as any).handleKeypress('', { name: 'enter' }); // to baseUrl
+    (tui as any).handleKeypress('', { name: 'enter' }); // to apiKey
+    (tui as any).handleKeypress('', { name: 'enter' }); // to priority (keep prefilled '1')
+    (tui as any).handleKeypress('', { name: 'enter' }); // to weight
+    (tui as any).handleKeypress('-', { name: '-' });
+    (tui as any).handleKeypress('5', { name: '5' }); // invalid weight '-5'
+    (tui as any).handleKeypress('', { name: 'enter' }); // to finish -> should discard
+    expect((tui as any).wizard.step).toBe('none');
+
+    // Check config (no provider 'v' should be added)
+    savedConfig = JSON.parse(fs.readFileSync(tempConfigPath, 'utf8'));
+    expect(savedConfig.providers.find((p: any) => p.id === 'v')).toBeUndefined();
+  });
+
+  it('wizard preserves intentional 0 for priority and weight', () => {
+    const tui = new DashboardTui(tempConfigPath);
+    const state = (tui as any).state;
+    state.activeTab = 'providers';
+
+    (tui as any).handleKey('a');
+    (tui as any).handleKeypress('z', { name: 'z' }); // ID
+    (tui as any).handleKeypress('', { name: 'enter' }); // to type
+    (tui as any).handleKeypress('', { name: 'enter' }); // to baseUrl
+    (tui as any).handleKeypress('', { name: 'enter' }); // to apiKey
+    (tui as any).handleKeypress('', { name: 'enter' }); // to priority
+    (tui as any).handleKeypress('0', { name: '0' }); // priority = 0
+    (tui as any).handleKeypress('', { name: 'enter' }); // to weight
+    (tui as any).handleKeypress('0', { name: '0' }); // weight = 0
+    (tui as any).handleKeypress('', { name: 'enter' }); // to finish
+    expect((tui as any).wizard.step).toBe('none');
+
+    // Check config (provider 'z' should have priority 0 and weight 0)
+    const savedConfig = JSON.parse(fs.readFileSync(tempConfigPath, 'utf8'));
+    const added = savedConfig.providers.find((p: any) => p.id === 'z');
+    expect(added).toBeDefined();
+    expect(added.priority).toBe(0);
+    expect(added.weight).toBe(0);
   });
 });
 

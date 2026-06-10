@@ -98,7 +98,8 @@ export class DashboardTui {
     baseUrl: '',
     apiKey: '',
     priority: '1',
-    weight: '1'
+    weight: '1',
+    isFirstKey: false
   };
 
   constructor(configPath: string) {
@@ -186,8 +187,16 @@ export class DashboardTui {
   private advanceWizard() {
     const step = this.wizard.step;
     if (step === 'id') {
-      if (!this.wizard.id.trim()) return;
+      const id = this.wizard.id.trim();
+      if (!id) return;
+      const accounts = this.getUnifiedAccounts();
+      if (accounts.some((acc) => acc.id === id)) {
+        this.wizard.step = 'none';
+        this.render();
+        return;
+      }
       this.wizard.step = 'type';
+      this.wizard.isFirstKey = true;
     } else if (step === 'type') {
       const type = this.wizard.type;
       if (type === 'openai-compatible') this.wizard.baseUrl = 'https://api.openai.com/v1';
@@ -197,20 +206,49 @@ export class DashboardTui {
       else if (type === 'fake') this.wizard.baseUrl = 'http://localhost:8080';
       else this.wizard.baseUrl = '';
       this.wizard.step = 'baseUrl';
+      this.wizard.isFirstKey = true;
     } else if (step === 'baseUrl') {
       this.wizard.step = 'apiKey';
+      this.wizard.isFirstKey = true;
     } else if (step === 'apiKey') {
+      this.wizard.priority = '1';
       this.wizard.step = 'priority';
+      this.wizard.isFirstKey = true;
     } else if (step === 'priority') {
+      this.wizard.weight = '1';
       this.wizard.step = 'weight';
+      this.wizard.isFirstKey = true;
     } else if (step === 'weight') {
+      const priorityStr = this.wizard.priority.trim();
+      const weightStr = this.wizard.weight.trim();
+
+      let priority = 1;
+      if (priorityStr !== '') {
+        if (!/^\d+$/.test(priorityStr)) {
+          this.wizard.step = 'none';
+          this.render();
+          return;
+        }
+        priority = Number(priorityStr);
+      }
+
+      let weight = 1;
+      if (weightStr !== '') {
+        if (!/^\d+$/.test(weightStr)) {
+          this.wizard.step = 'none';
+          this.render();
+          return;
+        }
+        weight = Number(weightStr);
+      }
+
       const newProvider: any = {
         id: this.wizard.id.trim(),
         type: this.wizard.type,
         baseUrl: this.wizard.baseUrl.trim() || undefined,
         apiKey: this.wizard.apiKey.trim() || undefined,
-        priority: Number(this.wizard.priority.trim()) || 1,
-        weight: Number(this.wizard.weight.trim()) || 1
+        priority,
+        weight
       };
       if (!this.state.config.providers) {
         this.state.config.providers = [];
@@ -224,6 +262,7 @@ export class DashboardTui {
   }
 
   private backspaceWizard() {
+    this.wizard.isFirstKey = false;
     const step = this.wizard.step;
     if (step === 'id') this.wizard.id = this.wizard.id.slice(0, -1);
     else if (step === 'baseUrl') this.wizard.baseUrl = this.wizard.baseUrl.slice(0, -1);
@@ -235,11 +274,20 @@ export class DashboardTui {
 
   private typeWizard(str: string) {
     const step = this.wizard.step;
-    if (step === 'id') this.wizard.id += str;
-    else if (step === 'baseUrl') this.wizard.baseUrl += str;
-    else if (step === 'apiKey') this.wizard.apiKey += str;
-    else if (step === 'priority') this.wizard.priority += str;
-    else if (step === 'weight') this.wizard.weight += str;
+    if (this.wizard.isFirstKey) {
+      this.wizard.isFirstKey = false;
+      if (step === 'id') this.wizard.id = str;
+      else if (step === 'baseUrl') this.wizard.baseUrl = str;
+      else if (step === 'apiKey') this.wizard.apiKey = str;
+      else if (step === 'priority') this.wizard.priority = str;
+      else if (step === 'weight') this.wizard.weight = str;
+    } else {
+      if (step === 'id') this.wizard.id += str;
+      else if (step === 'baseUrl') this.wizard.baseUrl += str;
+      else if (step === 'apiKey') this.wizard.apiKey += str;
+      else if (step === 'priority') this.wizard.priority += str;
+      else if (step === 'weight') this.wizard.weight += str;
+    }
     this.render();
   }
 
@@ -468,7 +516,8 @@ export class DashboardTui {
           baseUrl: '',
           apiKey: '',
           priority: '1',
-          weight: '1'
+          weight: '1',
+          isFirstKey: true
         };
         this.render();
       }
