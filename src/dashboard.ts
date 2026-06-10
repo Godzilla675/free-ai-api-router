@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 import * as readline from 'node:readline';
-import { validateDashboardConfig, formatTuiLine, updateSettingField, getSettingField } from './dashboard-helper.js';
+import { validateDashboardConfig, formatTuiLine, updateSettingField, getSettingField, deleteProviderFromConfig } from './dashboard-helper.js';
 
 type Tab = 'overview' | 'providers' | 'settings' | 'logs';
 
@@ -35,6 +36,33 @@ interface TuiState {
 
 const TABS: Tab[] = ['overview', 'providers', 'settings', 'logs'];
 
+const PROVIDER_TYPES = [
+  'openai-compatible',
+  'gemini',
+  'openai-responses',
+  'codex',
+  'aistudio',
+  'claude',
+  'xai',
+  'kimi',
+  'fake'
+];
+
+interface UnifiedAccount {
+  source: 'config' | 'auth';
+  id: string;
+  type: string;
+  preview: string;
+  disabled: boolean;
+  raw: any;
+}
+
+function formatKeyPreview(key: string): string {
+  if (!key) return '[None]';
+  if (key.length <= 8) return '...';
+  return `${key.slice(0, 4)}...${key.slice(-4)}`;
+}
+
 const ESC = '\x1b';
 const RGB = (r: number, g: number, b: number) => `${ESC}[38;2;${r};${g};${b}m`;
 const BG_RGB = (r: number, g: number, b: number) => `${ESC}[48;2;${r};${g};${b}m`;
@@ -62,6 +90,17 @@ export class DashboardTui {
     editValue: ''
   };
 
+  private authRecords: any[] = [];
+  private wizard = {
+    step: 'none' as 'id' | 'type' | 'baseUrl' | 'apiKey' | 'priority' | 'weight' | 'none',
+    id: '',
+    type: 'openai-compatible',
+    baseUrl: '',
+    apiKey: '',
+    priority: '1',
+    weight: '1'
+  };
+
   constructor(configPath: string) {
     this.state.configPath = configPath;
     this.loadConfig();
@@ -79,6 +118,129 @@ export class DashboardTui {
     } catch (err) {
       this.state.config = {};
     }
+    this.loadAuthRecords();
+  }
+
+  private loadAuthRecords() {
+    try {
+      const authDir = this.state.config.auth?.authDir || 'router-state/auth';
+      if (fs.existsSync(authDir)) {
+        const files = fs.readdirSync(authDir);
+        this.authRecords = [];
+        for (const file of files.filter((f) => f.endsWith('.json')).sort()) {
+          const raw = fs.readFileSync(path.join(authDir, file), 'utf8');
+          this.authRecords.push(JSON.parse(raw));
+        }
+      } else {
+        this.authRecords = [];
+      }
+    } catch (err) {
+      this.authRecords = [];
+    }
+  }
+
+  private getUnifiedAccounts(): UnifiedAccount[] {
+    const list: UnifiedAccount[] = [];
+    if (Array.isArray(this.state.config.providers)) {
+      for (const p of this.state.config.providers) {
+        let preview = '[None]';
+        if (p.apiKey) {
+          preview = formatKeyPreview(p.apiKey);
+        } else if (p.apiKeyEnv) {
+          preview = `Env: ${p.apiKeyEnv}`;
+        } else if (p.allowLocal) {
+          preview = '[Local Only]';
+        }
+        list.push({
+          source: 'config',
+          id: p.id,
+          type: p.type,
+          preview,
+          disabled: !!p.disabled,
+          raw: p
+        });
+      }
+    }
+    for (const r of this.authRecords) {
+      let preview = '[REDACTED]';
+      if (r.metadata?.expiresAt) {
+        preview = `Expires: ${r.metadata.expiresAt}`;
+      } else if (r.secrets) {
+        const firstSecret = Object.values(r.secrets)[0];
+        if (typeof firstSecret === 'string') {
+          preview = formatKeyPreview(firstSecret);
+        }
+      }
+      list.push({
+        source: 'auth',
+        id: r.id,
+        type: r.provider,
+        preview,
+        disabled: !!r.disabled,
+        raw: r
+      });
+    }
+    return list;
+  }
+
+  private advanceWizard() {
+    const step = this.wizard.step;
+    if (step === 'id') {
+      if (!this.wizard.id.trim()) return;
+      this.wizard.step = 'type';
+    } else if (step === 'type') {
+      const type = this.wizard.type;
+      if (type === 'openai-compatible') this.wizard.baseUrl = 'https://api.openai.com/v1';
+      else if (type === 'gemini' || type === 'aistudio') this.wizard.baseUrl = 'https://generativelanguage.googleapis.com';
+      else if (type === 'claude') this.wizard.baseUrl = 'https://api.anthropic.com';
+      else if (type === 'xai') this.wizard.baseUrl = 'https://api.x.ai';
+      else if (type === 'fake') this.wizard.baseUrl = 'http://localhost:8080';
+      else this.wizard.baseUrl = '';
+      this.wizard.step = 'baseUrl';
+    } else if (step === 'baseUrl') {
+      this.wizard.step = 'apiKey';
+    } else if (step === 'apiKey') {
+      this.wizard.step = 'priority';
+    } else if (step === 'priority') {
+      this.wizard.step = 'weight';
+    } else if (step === 'weight') {
+      const newProvider: any = {
+        id: this.wizard.id.trim(),
+        type: this.wizard.type,
+        baseUrl: this.wizard.baseUrl.trim() || undefined,
+        apiKey: this.wizard.apiKey.trim() || undefined,
+        priority: Number(this.wizard.priority.trim()) || 1,
+        weight: Number(this.wizard.weight.trim()) || 1
+      };
+      if (!this.state.config.providers) {
+        this.state.config.providers = [];
+      }
+      this.state.config.providers.push(newProvider);
+      this.saveConfig();
+      this.loadConfig();
+      this.wizard.step = 'none';
+    }
+    this.render();
+  }
+
+  private backspaceWizard() {
+    const step = this.wizard.step;
+    if (step === 'id') this.wizard.id = this.wizard.id.slice(0, -1);
+    else if (step === 'baseUrl') this.wizard.baseUrl = this.wizard.baseUrl.slice(0, -1);
+    else if (step === 'apiKey') this.wizard.apiKey = this.wizard.apiKey.slice(0, -1);
+    else if (step === 'priority') this.wizard.priority = this.wizard.priority.slice(0, -1);
+    else if (step === 'weight') this.wizard.weight = this.wizard.weight.slice(0, -1);
+    this.render();
+  }
+
+  private typeWizard(str: string) {
+    const step = this.wizard.step;
+    if (step === 'id') this.wizard.id += str;
+    else if (step === 'baseUrl') this.wizard.baseUrl += str;
+    else if (step === 'apiKey') this.wizard.apiKey += str;
+    else if (step === 'priority') this.wizard.priority += str;
+    else if (step === 'weight') this.wizard.weight += str;
+    this.render();
   }
 
   private saveConfig() {
@@ -135,6 +297,29 @@ export class DashboardTui {
         if (!key || (!key.ctrl && !key.meta)) {
           this.state.editValue += str;
           this.render();
+        }
+      }
+    } else if (this.state.activeTab === 'providers' && this.wizard.step !== 'none') {
+      if (key && key.name === 'escape') {
+        this.wizard.step = 'none';
+        this.render();
+      } else if (key && (key.name === 'enter' || key.name === 'return')) {
+        this.advanceWizard();
+      } else if (key && key.name === 'backspace') {
+        this.backspaceWizard();
+      } else if (key && (key.name === 'up' || key.name === 'down')) {
+        if (this.wizard.step === 'type') {
+          const idx = PROVIDER_TYPES.indexOf(this.wizard.type);
+          if (key.name === 'up') {
+            this.wizard.type = PROVIDER_TYPES[(idx - 1 + PROVIDER_TYPES.length) % PROVIDER_TYPES.length]!;
+          } else {
+            this.wizard.type = PROVIDER_TYPES[(idx + 1) % PROVIDER_TYPES.length]!;
+          }
+          this.render();
+        }
+      } else if (str && str.length === 1 && str.charCodeAt(0) >= 32) {
+        if (!key || (!key.ctrl && !key.meta)) {
+          this.typeWizard(str);
         }
       }
     } else {
@@ -206,6 +391,8 @@ export class DashboardTui {
     } else if (keyName === 'up') {
       if (this.state.activeTab === 'settings') {
         this.state.selectedIndex = Math.max(0, this.state.selectedIndex - 1);
+      } else if (this.state.activeTab === 'providers') {
+        this.state.selectedIndex = Math.max(0, this.state.selectedIndex - 1);
       } else {
         this.state.selectedIndex = Math.max(0, this.state.selectedIndex - 1);
       }
@@ -213,6 +400,9 @@ export class DashboardTui {
     } else if (keyName === 'down') {
       if (this.state.activeTab === 'settings') {
         this.state.selectedIndex = Math.min(SETTINGS_FIELDS.length - 1, this.state.selectedIndex + 1);
+      } else if (this.state.activeTab === 'providers') {
+        const len = this.getUnifiedAccounts().length;
+        this.state.selectedIndex = Math.min(Math.max(0, len - 1), this.state.selectedIndex + 1);
       } else {
         this.state.selectedIndex = this.state.selectedIndex + 1;
       }
@@ -226,6 +416,61 @@ export class DashboardTui {
           this.state.editValue = val === undefined ? '' : String(val);
           this.render();
         }
+      }
+    } else if (keyName === 'd') {
+      if (this.state.activeTab === 'providers' && this.wizard.step === 'none') {
+        const accounts = this.getUnifiedAccounts();
+        const selected = accounts[this.state.selectedIndex];
+        if (selected) {
+          if (selected.source === 'config') {
+            selected.raw.disabled = !selected.raw.disabled;
+            this.saveConfig();
+            this.loadConfig();
+          } else if (selected.source === 'auth') {
+            selected.raw.disabled = !selected.raw.disabled;
+            const authDir = this.state.config.auth?.authDir || 'router-state/auth';
+            if (!fs.existsSync(authDir)) {
+              fs.mkdirSync(authDir, { recursive: true });
+            }
+            const filePath = path.join(authDir, `${selected.id}.json`);
+            fs.writeFileSync(filePath, JSON.stringify(selected.raw, null, 2) + '\n', 'utf8');
+            this.loadConfig();
+          }
+        }
+      }
+    } else if (keyName === 'delete') {
+      if (this.state.activeTab === 'providers' && this.wizard.step === 'none') {
+        const accounts = this.getUnifiedAccounts();
+        const selected = accounts[this.state.selectedIndex];
+        if (selected) {
+          if (selected.source === 'config') {
+            deleteProviderFromConfig(this.state.config, selected.id);
+            this.saveConfig();
+            this.loadConfig();
+            this.state.selectedIndex = Math.max(0, this.state.selectedIndex - 1);
+          } else if (selected.source === 'auth') {
+            const authDir = this.state.config.auth?.authDir || 'router-state/auth';
+            const filePath = path.join(authDir, `${selected.id}.json`);
+            if (fs.existsSync(filePath)) {
+              fs.unlinkSync(filePath);
+            }
+            this.loadConfig();
+            this.state.selectedIndex = Math.max(0, this.state.selectedIndex - 1);
+          }
+        }
+      }
+    } else if (keyName === 'a') {
+      if (this.state.activeTab === 'providers' && this.wizard.step === 'none') {
+        this.wizard = {
+          step: 'id',
+          id: '',
+          type: 'openai-compatible',
+          baseUrl: '',
+          apiKey: '',
+          priority: '1',
+          weight: '1'
+        };
+        this.render();
       }
     }
   }
@@ -275,6 +520,63 @@ export class DashboardTui {
         }
         detailLines.push(line);
       }
+    } else if (this.state.activeTab === 'providers') {
+      if (this.wizard.step !== 'none') {
+        detailLines.push(`${COLORS.blue}${BOLD}➕ Add New API Key Provider${DETAIL_DEFAULT}`);
+        detailLines.push(`${COLORS.gray}Enter configuration values. [Enter] to advance, [Esc] to cancel${DETAIL_DEFAULT}`);
+        detailLines.push('');
+
+        const steps = [
+          { key: 'id', label: 'Provider ID', value: this.wizard.id, desc: '(e.g., openai-1, gemini-personal)' },
+          { key: 'type', label: 'Provider Type', value: this.wizard.type, desc: '(Use Up/Down keys to change type)' },
+          { key: 'baseUrl', label: 'Base URL', value: this.wizard.baseUrl, desc: '(e.g., https://api.openai.com/v1)' },
+          { key: 'apiKey', label: 'API Key', value: '*'.repeat(this.wizard.apiKey.length), desc: '(hidden for security)' },
+          { key: 'priority', label: 'Priority', value: this.wizard.priority, desc: '(Higher priority checked first)' },
+          { key: 'weight', label: 'Weight', value: this.wizard.weight, desc: '(For load balancing)' }
+        ];
+
+        for (const s of steps) {
+          const isActive = this.wizard.step === s.key;
+          const prefix = isActive ? `${COLORS.blue}➔ ` : '  ';
+          const labelColor = isActive ? COLORS.green : COLORS.text;
+          const valColor = isActive ? COLORS.green + BOLD : COLORS.text;
+          
+          let line = `${prefix}${labelColor}${s.label}: ${valColor}${s.value || ''}${DETAIL_DEFAULT}`;
+          if (isActive) {
+            line += ` [${COLORS.blue}_${DETAIL_DEFAULT}] ${COLORS.gray}${s.desc}${DETAIL_DEFAULT}`;
+          }
+          detailLines.push(line);
+        }
+      } else {
+        detailLines.push(`${COLORS.blue}${BOLD}🔑 Provider Accounts${DETAIL_DEFAULT}`);
+        detailLines.push(`${COLORS.gray}Use Up/Down to navigate, [D] Toggle Active, [Delete] Remove, [A] Add Provider${DETAIL_DEFAULT}`);
+        detailLines.push('');
+
+        const accounts = this.getUnifiedAccounts();
+        if (accounts.length === 0) {
+          detailLines.push(`  ${COLORS.gray}(No provider accounts found)${DETAIL_DEFAULT}`);
+        } else {
+          detailLines.push(`  ${BOLD}${COLORS.text}${'ID'.padEnd(20)} ${'Type'.padEnd(20)} ${'Key/OAuth Preview'.padEnd(20)} Status${DETAIL_DEFAULT}`);
+          detailLines.push(`  ${COLORS.gray}-------------------------------------------------------------------------${DETAIL_DEFAULT}`);
+          
+          for (let i = 0; i < accounts.length; i++) {
+            const acc = accounts[i]!;
+            const isSelected = i === this.state.selectedIndex;
+            const prefix = isSelected ? `${COLORS.blue}➔ ` : '  ';
+            
+            const idCol = acc.id.padEnd(20).slice(0, 20);
+            const typeCol = acc.type.padEnd(20).slice(0, 20);
+            const previewCol = acc.preview.padEnd(20).slice(0, 20);
+            const statusCol = acc.disabled 
+              ? `${COLORS.red}○ Disabled${DETAIL_DEFAULT}` 
+              : `${COLORS.green}● Active${DETAIL_DEFAULT}`;
+
+            const rowColor = isSelected ? COLORS.blue : COLORS.text;
+            const line = `${prefix}${rowColor}${idCol} ${typeCol} ${previewCol} ${statusCol}`;
+            detailLines.push(line);
+          }
+        }
+      }
     } else {
       detailLines.push(formatTuiLine(` Active Tab: ${this.state.activeTab.toUpperCase()}`, detailWidth));
       detailLines.push(formatTuiLine(` Selection Row: ${this.state.selectedIndex}`, detailWidth));
@@ -299,6 +601,12 @@ export class DashboardTui {
         footerText = ' ⌨ [Enter]: Save | [Esc]: Cancel | [Backspace]: Delete';
       } else {
         footerText = ' ⌨ Up/Down: Select | [Enter]: Edit | Left/Right: Tabs | [q] Quit';
+      }
+    } else if (this.state.activeTab === 'providers') {
+      if (this.wizard.step !== 'none') {
+        footerText = ' ⌨ [Enter]: Next/Save | [Esc]: Cancel | [Backspace]: Backspace';
+      } else {
+        footerText = ' ⌨ Up/Down: Select | [D]: Toggle Active | [Delete]: Remove | [A]: Add | Left/Right: Tabs | [q] Quit';
       }
     }
     buffer.push(COLORS.blue + formatTuiLine(footerText, cols) + RESET);

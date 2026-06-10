@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { join } from 'node:path';
 import { validateDashboardConfig, formatTuiLine, updateSettingField, getSettingField } from '../src/dashboard-helper.js';
 
 describe('validateDashboardConfig', () => {
@@ -126,6 +127,219 @@ describe('DashboardTui settings editing and validation', () => {
     expect(state.config.routing.sessionAffinity).toBe(true); // unchanged
   });
 });
+
+import { deleteProviderFromConfig } from '../src/dashboard-helper.js';
+
+describe('deleteProviderFromConfig', () => {
+  it('removes provider from configs', () => {
+    const config = { providers: [{ id: 'openai-1', type: 'openai-compatible' }] };
+    deleteProviderFromConfig(config, 'openai-1');
+    expect(config.providers.length).toBe(0);
+  });
+});
+
+describe('DashboardTui provider management', () => {
+  const tempConfigPath = 'temp-config-providers-test.json';
+  const tempAuthDir = 'temp-auth-providers-test';
+
+  beforeEach(() => {
+    fs.writeFileSync(
+      tempConfigPath,
+      JSON.stringify({
+        auth: { authDir: tempAuthDir },
+        providers: [
+          { id: 'openai-test', type: 'openai-compatible', apiKey: 'sk-123456789abc' },
+          { id: 'gemini-env-test', type: 'gemini', apiKeyEnv: 'GEMINI_API_KEY', disabled: true }
+        ]
+      }),
+      'utf8'
+    );
+    if (!fs.existsSync(tempAuthDir)) {
+      fs.mkdirSync(tempAuthDir, { recursive: true });
+    }
+    // Create an auth record
+    fs.writeFileSync(
+      join(tempAuthDir, 'oauth-record.json'),
+      JSON.stringify({
+        id: 'oauth-record',
+        provider: 'gemini-oauth',
+        status: 'available',
+        disabled: false,
+        createdAt: '2026-06-05T00:00:00.000Z',
+        updatedAt: '2026-06-05T00:00:00.000Z',
+        metadata: { expiresAt: '2026-06-05T01:00:00.000Z' }
+      }),
+      'utf8'
+    );
+  });
+
+  afterEach(() => {
+    if (fs.existsSync(tempConfigPath)) {
+      fs.unlinkSync(tempConfigPath);
+    }
+    if (fs.existsSync(tempAuthDir)) {
+      fs.rmSync(tempAuthDir, { recursive: true, force: true });
+    }
+  });
+
+  it('correctly loads unified accounts list', () => {
+    const tui = new DashboardTui(tempConfigPath);
+    const accounts = (tui as any).getUnifiedAccounts();
+
+    expect(accounts.length).toBe(3);
+
+    const openai = accounts.find((a: any) => a.id === 'openai-test');
+    expect(openai).toBeDefined();
+    expect(openai.source).toBe('config');
+    expect(openai.preview).toBe('sk-1...9abc');
+    expect(openai.disabled).toBe(false);
+
+    const geminiEnv = accounts.find((a: any) => a.id === 'gemini-env-test');
+    expect(geminiEnv).toBeDefined();
+    expect(geminiEnv.source).toBe('config');
+    expect(geminiEnv.preview).toBe('Env: GEMINI_API_KEY');
+    expect(geminiEnv.disabled).toBe(true);
+
+    const oauth = accounts.find((a: any) => a.id === 'oauth-record');
+    expect(oauth).toBeDefined();
+    expect(oauth.source).toBe('auth');
+    expect(oauth.preview).toBe('Expires: 2026-06-05T01:00:00.000Z');
+    expect(oauth.disabled).toBe(false);
+  });
+
+  it('toggles disabled status with key d', () => {
+    const tui = new DashboardTui(tempConfigPath);
+    const state = (tui as any).state;
+    state.activeTab = 'providers';
+    state.selectedIndex = 0; // openai-test
+
+    // Toggle disabled
+    (tui as any).handleKey('d');
+    let accounts = (tui as any).getUnifiedAccounts();
+    let openai = accounts.find((a: any) => a.id === 'openai-test');
+    expect(openai.disabled).toBe(true);
+
+    // Verify it is saved in config
+    const savedConfig = JSON.parse(fs.readFileSync(tempConfigPath, 'utf8'));
+    expect(savedConfig.providers.find((p: any) => p.id === 'openai-test').disabled).toBe(true);
+
+    // Toggle disabled on auth record
+    state.selectedIndex = 2; // oauth-record
+    (tui as any).handleKey('d');
+    accounts = (tui as any).getUnifiedAccounts();
+    const oauth = accounts.find((a: any) => a.id === 'oauth-record');
+    expect(oauth.disabled).toBe(true);
+
+    // Verify written to auth file
+    const savedAuth = JSON.parse(fs.readFileSync(join(tempAuthDir, 'oauth-record.json'), 'utf8'));
+    expect(savedAuth.disabled).toBe(true);
+  });
+
+  it('removes accounts with delete key', () => {
+    const tui = new DashboardTui(tempConfigPath);
+    const state = (tui as any).state;
+    state.activeTab = 'providers';
+    state.selectedIndex = 0; // openai-test
+
+    // Delete openai-test
+    (tui as any).handleKey('delete');
+    let accounts = (tui as any).getUnifiedAccounts();
+    expect(accounts.length).toBe(2);
+    expect(accounts.find((a: any) => a.id === 'openai-test')).toBeUndefined();
+
+    // Verify removed from config.json
+    const savedConfig = JSON.parse(fs.readFileSync(tempConfigPath, 'utf8'));
+    expect(savedConfig.providers.length).toBe(1);
+
+    // Delete oauth-record (index is now 1 because openai-test was removed)
+    state.selectedIndex = 1; // oauth-record
+    (tui as any).handleKey('delete');
+    accounts = (tui as any).getUnifiedAccounts();
+    expect(accounts.length).toBe(1);
+    expect(accounts.find((a: any) => a.id === 'oauth-record')).toBeUndefined();
+
+    // Verify deleted from disk
+    expect(fs.existsSync(join(tempAuthDir, 'oauth-record.json'))).toBe(false);
+  });
+
+  it('runs addition wizard correctly', () => {
+    const tui = new DashboardTui(tempConfigPath);
+    const state = (tui as any).state;
+    state.activeTab = 'providers';
+
+    // Start wizard
+    (tui as any).handleKey('a');
+    expect((tui as any).wizard.step).toBe('id');
+
+    // Type id
+    (tui as any).handleKeypress('n', { name: 'n' });
+    (tui as any).handleKeypress('e', { name: 'e' });
+    (tui as any).handleKeypress('w', { name: 'w' });
+    expect((tui as any).wizard.id).toBe('new');
+
+    // Advance to type selection
+    (tui as any).handleKeypress('', { name: 'enter' });
+    expect((tui as any).wizard.step).toBe('type');
+    expect((tui as any).wizard.type).toBe('openai-compatible');
+
+    // Select type 'gemini' (up/down)
+    (tui as any).handleKeypress('', { name: 'down' });
+    expect((tui as any).wizard.type).toBe('gemini');
+
+    // Advance to baseUrl
+    (tui as any).handleKeypress('', { name: 'enter' });
+    expect((tui as any).wizard.step).toBe('baseUrl');
+    expect((tui as any).wizard.baseUrl).toBe('https://generativelanguage.googleapis.com');
+
+    // Advance to apiKey
+    (tui as any).handleKeypress('', { name: 'enter' });
+    expect((tui as any).wizard.step).toBe('apiKey');
+
+    // Type API key
+    (tui as any).handleKeypress('a', { name: 'a' });
+    (tui as any).handleKeypress('b', { name: 'b' });
+    (tui as any).handleKeypress('c', { name: 'c' });
+    expect((tui as any).wizard.apiKey).toBe('abc');
+
+    // Advance to priority
+    (tui as any).handleKeypress('', { name: 'enter' });
+    expect((tui as any).wizard.step).toBe('priority');
+
+    // Type priority
+    (tui as any).handleKeypress('3', { name: '3' });
+    expect((tui as any).wizard.priority).toBe('13'); // default '1' + '3' = '13' (let's check)
+
+    // Backspace priority
+    (tui as any).handleKeypress('', { name: 'backspace' });
+    (tui as any).handleKeypress('', { name: 'backspace' }); // now empty
+    (tui as any).handleKeypress('3', { name: '3' }); // now '3'
+    expect((tui as any).wizard.priority).toBe('3');
+
+    // Advance to weight
+    (tui as any).handleKeypress('', { name: 'enter' });
+    expect((tui as any).wizard.step).toBe('weight');
+
+    // Type weight
+    (tui as any).handleKeypress('', { name: 'backspace' }); // clear default
+    (tui as any).handleKeypress('2', { name: '2' });
+    expect((tui as any).wizard.weight).toBe('2');
+
+    // Advance (finish)
+    (tui as any).handleKeypress('', { name: 'enter' });
+    expect((tui as any).wizard.step).toBe('none');
+
+    // Verify it is saved in config
+    const savedConfig = JSON.parse(fs.readFileSync(tempConfigPath, 'utf8'));
+    const added = savedConfig.providers.find((p: any) => p.id === 'new');
+    expect(added).toBeDefined();
+    expect(added.type).toBe('gemini');
+    expect(added.baseUrl).toBe('https://generativelanguage.googleapis.com');
+    expect(added.apiKey).toBe('abc');
+    expect(added.priority).toBe(3);
+    expect(added.weight).toBe(2);
+  });
+});
+
 
 
 

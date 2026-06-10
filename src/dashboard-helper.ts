@@ -46,5 +46,11 @@ export function getSettingField(config: any, path: string): any {
   return current;
 }
 
+export function deleteProviderFromConfig(config: any, id: string): void {
+  if (Array.isArray(config.providers)) {
+    config.providers = config.providers.filter((p: any) => p.id !== id);
+  }
+}
+
 
 

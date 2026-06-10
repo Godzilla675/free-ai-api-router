@@ -52,6 +52,7 @@ export interface ProviderConfig {
   weight?: number;
   optional?: boolean;
   allowLocal?: boolean;
+  disabled?: boolean;
   modelFilter?: 'free' | string;
   headers?: Record<string, string>;
   timeoutMs?: number;

@@ -13,6 +13,9 @@ export function normalizeConfig(config: RouterConfig): RouterConfig {
   const providers = (config.providers ?? [])
     .map(resolveProviderSecrets)
     .filter((provider) => {
+      if (provider.disabled) {
+        return false;
+      }
       if (provider.type === 'fake') {
         return true;
       }
