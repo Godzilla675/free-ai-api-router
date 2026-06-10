@@ -18,6 +18,7 @@ const SETTINGS_FIELDS: SettingField[] = [
   { path: 'server.maxBodyBytes', label: 'Max Body Bytes', type: 'number' },
   { path: 'routing.strategy', label: 'Routing Strategy', type: 'select', options: ['priority', 'weighted', 'round-robin', 'fill-first', 'session-affinity'] },
   { path: 'routing.sessionAffinity', label: 'Session Affinity', type: 'boolean' },
+  { path: 'routing.healthCooldownMs', label: 'Health Cooldown (ms)', type: 'number' },
   { path: 'limits.global.rpm', label: 'Global RPM Limit', type: 'number' },
   { path: 'limits.global.tpm', label: 'Global TPM Limit', type: 'number' },
   { path: 'limits.global.maxParallel', label: 'Global Max Parallel Limit', type: 'number' }
@@ -148,20 +149,40 @@ export class DashboardTui {
     if (field) {
       const trimmed = this.state.editValue.trim();
       let value: any;
-      if (field.type === 'number') {
-        if (trimmed === '') {
-          value = undefined;
-        } else {
+
+      if (trimmed === '') {
+        value = undefined;
+      } else {
+        if (field.type === 'number') {
           value = Number(trimmed);
           if (isNaN(value)) {
-            value = undefined;
+            this.state.isEditing = false;
+            this.render();
+            return;
           }
+        } else if (field.type === 'boolean') {
+          const lower = trimmed.toLowerCase();
+          if (lower === 'true') {
+            value = true;
+          } else if (lower === 'false') {
+            value = false;
+          } else {
+            this.state.isEditing = false;
+            this.render();
+            return;
+          }
+        } else if (field.type === 'select') {
+          if (field.options && !field.options.includes(trimmed)) {
+            this.state.isEditing = false;
+            this.render();
+            return;
+          }
+          value = trimmed;
+        } else {
+          value = trimmed;
         }
-      } else if (field.type === 'boolean') {
-        value = trimmed.toLowerCase() === 'true';
-      } else {
-        value = trimmed;
       }
+
       updateSettingField(this.state.config, field.path, value);
       this.saveConfig();
     }

@@ -19,12 +19,19 @@ export function updateSettingField(config: any, path: string, value: any): void 
   for (let i = 0; i < parts.length - 1; i++) {
     const part = parts[i]!;
     if (!(part in current)) {
+      if (value === undefined) {
+        return;
+      }
       current[part] = {};
     }
     current = current[part];
   }
   const lastKey = parts[parts.length - 1]!;
-  current[lastKey] = value;
+  if (value === undefined) {
+    delete current[lastKey];
+  } else {
+    current[lastKey] = value;
+  }
 }
 
 export function getSettingField(config: any, path: string): any {
