@@ -51,6 +51,14 @@ export function deleteProviderFromConfig(config: any, id: string): void {
     config.providers = config.providers.filter((p: any) => p.id !== id);
   }
 }
-
-
-
+export function buildGoogleOAuthUrl(clientId: string, redirectUri: string): string {
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: 'https://www.googleapis.com/auth/generative-language',
+    access_type: 'offline',
+    prompt: 'consent'
+  });
+  return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+}

@@ -1,7 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
-import { validateDashboardConfig, formatTuiLine, updateSettingField, getSettingField, deleteProviderFromConfig } from './dashboard-helper.js';
+import * as http from 'node:http';
+import { validateDashboardConfig, formatTuiLine, updateSettingField, getSettingField, deleteProviderFromConfig, buildGoogleOAuthUrl } from './dashboard-helper.js';
 
 type Tab = 'overview' | 'providers' | 'settings' | 'logs';
 
@@ -91,15 +92,20 @@ export class DashboardTui {
   };
 
   private authRecords: any[] = [];
+  private oauthServer: http.Server | null = null;
   private wizard = {
-    step: 'none' as 'id' | 'type' | 'baseUrl' | 'apiKey' | 'priority' | 'weight' | 'none',
+    step: 'none' as 'id' | 'type' | 'baseUrl' | 'apiKey' | 'priority' | 'weight' | 'none' | 'oauth_id' | 'oauth_clientId' | 'oauth_clientSecret' | 'oauth_port' | 'oauth_waiting',
     id: '',
     type: 'openai-compatible',
     baseUrl: '',
     apiKey: '',
     priority: '1',
     weight: '1',
-    isFirstKey: false
+    isFirstKey: false,
+    clientId: 'default-google-client-id',
+    clientSecret: 'default-google-client-secret',
+    port: '52342',
+    oauthStatus: ''
   };
 
   constructor(configPath: string) {
@@ -257,18 +263,146 @@ export class DashboardTui {
       this.saveConfig();
       this.loadConfig();
       this.wizard.step = 'none';
+    } else if (step === 'oauth_id') {
+      const id = this.wizard.id.trim();
+      if (!id) return;
+      const accounts = this.getUnifiedAccounts();
+      if (accounts.some((acc) => acc.id === `gemini-${id}`)) {
+        this.wizard.step = 'none';
+        this.render();
+        return;
+      }
+      this.wizard.step = 'oauth_clientId';
+      this.wizard.isFirstKey = true;
+    } else if (step === 'oauth_clientId') {
+      this.wizard.step = 'oauth_clientSecret';
+      this.wizard.isFirstKey = true;
+    } else if (step === 'oauth_clientSecret') {
+      this.wizard.step = 'oauth_port';
+      this.wizard.isFirstKey = true;
+    } else if (step === 'oauth_port') {
+      this.wizard.step = 'oauth_waiting';
+      this.startOAuthCallbackServer();
     }
     this.render();
+  }
+
+  private startOAuthCallbackServer() {
+    const portNum = Number(this.wizard.port) || 52342;
+    const redirectUri = `http://localhost:${portNum}/`;
+    this.wizard.oauthStatus = 'Starting local callback server...';
+    
+    if (this.oauthServer) {
+      this.oauthServer.close();
+      this.oauthServer = null;
+    }
+
+    try {
+      this.oauthServer = http.createServer(async (req, res) => {
+        const url = new URL(req.url ?? '/', `http://${req.headers.host || 'localhost'}`);
+        const code = url.searchParams.get('code');
+        if (code) {
+          res.writeHead(200, { 'content-type': 'text/html' });
+          res.end('<h1>Authentication Successful!</h1><p>You can close this window now and return to the terminal.</p>');
+          
+          this.wizard.oauthStatus = 'Code received. Exchanging for tokens...';
+          this.render();
+
+          if (this.oauthServer) {
+            this.oauthServer.close();
+            this.oauthServer = null;
+          }
+
+          try {
+            const tokenUrl = process.env.GEMINI_TOKEN_URL || 'https://oauth2.googleapis.com/token';
+            const tokenRes = await fetch(tokenUrl, {
+              method: 'POST',
+              headers: { 'content-type': 'application/x-www-form-urlencoded' },
+              body: new URLSearchParams({
+                code,
+                client_id: this.wizard.clientId,
+                client_secret: this.wizard.clientSecret,
+                redirect_uri: redirectUri,
+                grant_type: 'authorization_code'
+              })
+            });
+
+            if (!tokenRes.ok) {
+              throw new Error(`Token exchange failed: ${await tokenRes.text()}`);
+            }
+
+            const tokens = await tokenRes.json() as any;
+            const now = new Date();
+            const expiresAt = new Date(Date.now() + (tokens.expires_in ?? 3600) * 1000).toISOString();
+            
+            const authRecord = {
+              id: `gemini-${this.wizard.id.trim()}`,
+              provider: 'gemini-oauth',
+              status: 'available',
+              disabled: false,
+              createdAt: now.toISOString(),
+              updatedAt: now.toISOString(),
+              lastRefreshedAt: now.toISOString(),
+              nextRefreshAfter: new Date(Date.now() + Math.max(60, (tokens.expires_in ?? 3600) - 300) * 1000).toISOString(),
+              attributes: {
+                clientId: this.wizard.clientId,
+                clientSecret: this.wizard.clientSecret
+              },
+              secrets: {
+                accessToken: tokens.access_token,
+                refreshToken: tokens.refresh_token || ''
+              },
+              metadata: {
+                expiresAt
+              }
+            };
+
+            const authDir = this.state.config.auth?.authDir || 'router-state/auth';
+            if (!fs.existsSync(authDir)) {
+              fs.mkdirSync(authDir, { recursive: true });
+            }
+            const recordPath = path.join(authDir, `${authRecord.id}.json`);
+            fs.writeFileSync(recordPath, JSON.stringify(authRecord, null, 2) + '\n', 'utf8');
+
+            this.loadConfig();
+            this.wizard.step = 'none';
+            this.render();
+          } catch (exchangeErr: any) {
+            this.wizard.oauthStatus = `Error: ${exchangeErr.message || exchangeErr}`;
+            this.render();
+          }
+        } else {
+          res.writeHead(400);
+          res.end('Missing code parameter');
+        }
+      });
+
+      this.oauthServer.listen(portNum, '127.0.0.1', () => {
+        this.wizard.oauthStatus = `Listening on http://localhost:${portNum}/ for redirect...`;
+        this.render();
+      });
+
+      this.oauthServer.on('error', (err: any) => {
+        this.wizard.oauthStatus = `Server error: ${err.message || err}`;
+        this.render();
+      });
+    } catch (serverErr: any) {
+      this.wizard.oauthStatus = `Failed to start server: ${serverErr.message || serverErr}`;
+      this.render();
+    }
   }
 
   private backspaceWizard() {
     this.wizard.isFirstKey = false;
     const step = this.wizard.step;
-    if (step === 'id') this.wizard.id = this.wizard.id.slice(0, -1);
+    if (step === 'id' || step === 'oauth_id') this.wizard.id = this.wizard.id.slice(0, -1);
     else if (step === 'baseUrl') this.wizard.baseUrl = this.wizard.baseUrl.slice(0, -1);
     else if (step === 'apiKey') this.wizard.apiKey = this.wizard.apiKey.slice(0, -1);
     else if (step === 'priority') this.wizard.priority = this.wizard.priority.slice(0, -1);
     else if (step === 'weight') this.wizard.weight = this.wizard.weight.slice(0, -1);
+    else if (step === 'oauth_clientId') this.wizard.clientId = this.wizard.clientId.slice(0, -1);
+    else if (step === 'oauth_clientSecret') this.wizard.clientSecret = this.wizard.clientSecret.slice(0, -1);
+    else if (step === 'oauth_port') this.wizard.port = this.wizard.port.slice(0, -1);
     this.render();
   }
 
@@ -276,17 +410,23 @@ export class DashboardTui {
     const step = this.wizard.step;
     if (this.wizard.isFirstKey) {
       this.wizard.isFirstKey = false;
-      if (step === 'id') this.wizard.id = str;
+      if (step === 'id' || step === 'oauth_id') this.wizard.id = str;
       else if (step === 'baseUrl') this.wizard.baseUrl = str;
       else if (step === 'apiKey') this.wizard.apiKey = str;
       else if (step === 'priority') this.wizard.priority = str;
       else if (step === 'weight') this.wizard.weight = str;
+      else if (step === 'oauth_clientId') this.wizard.clientId = str;
+      else if (step === 'oauth_clientSecret') this.wizard.clientSecret = str;
+      else if (step === 'oauth_port') this.wizard.port = str;
     } else {
-      if (step === 'id') this.wizard.id += str;
+      if (step === 'id' || step === 'oauth_id') this.wizard.id += str;
       else if (step === 'baseUrl') this.wizard.baseUrl += str;
       else if (step === 'apiKey') this.wizard.apiKey += str;
       else if (step === 'priority') this.wizard.priority += str;
       else if (step === 'weight') this.wizard.weight += str;
+      else if (step === 'oauth_clientId') this.wizard.clientId += str;
+      else if (step === 'oauth_clientSecret') this.wizard.clientSecret += str;
+      else if (step === 'oauth_port') this.wizard.port += str;
     }
     this.render();
   }
@@ -349,6 +489,10 @@ export class DashboardTui {
       }
     } else if (this.state.activeTab === 'providers' && this.wizard.step !== 'none') {
       if (key && key.name === 'escape') {
+        if (this.oauthServer) {
+          this.oauthServer.close();
+          this.oauthServer = null;
+        }
         this.wizard.step = 'none';
         this.render();
       } else if (key && (key.name === 'enter' || key.name === 'return')) {
@@ -517,7 +661,29 @@ export class DashboardTui {
           apiKey: '',
           priority: '1',
           weight: '1',
-          isFirstKey: true
+          isFirstKey: true,
+          clientId: 'default-google-client-id',
+          clientSecret: 'default-google-client-secret',
+          port: '52342',
+          oauthStatus: ''
+        };
+        this.render();
+      }
+    } else if (keyName === 'l') {
+      if (this.state.activeTab === 'providers' && this.wizard.step === 'none') {
+        this.wizard = {
+          step: 'oauth_id',
+          id: '',
+          type: 'gemini-oauth',
+          baseUrl: '',
+          apiKey: '',
+          priority: '1',
+          weight: '1',
+          isFirstKey: true,
+          clientId: 'default-google-client-id',
+          clientSecret: 'default-google-client-secret',
+          port: '52342',
+          oauthStatus: ''
         };
         this.render();
       }
@@ -571,34 +737,72 @@ export class DashboardTui {
       }
     } else if (this.state.activeTab === 'providers') {
       if (this.wizard.step !== 'none') {
-        detailLines.push(`${COLORS.blue}${BOLD}➕ Add New API Key Provider${DETAIL_DEFAULT}`);
-        detailLines.push(`${COLORS.gray}Enter configuration values. [Enter] to advance, [Esc] to cancel${DETAIL_DEFAULT}`);
-        detailLines.push('');
+        const isOauth = this.wizard.step.startsWith('oauth_');
+        if (isOauth) {
+          detailLines.push(`${COLORS.blue}${BOLD}🔑 Gemini OAuth Login Setup${DETAIL_DEFAULT}`);
+          detailLines.push(`${COLORS.gray}Configure Google OAuth credentials. [Enter] to advance, [Esc] to cancel${DETAIL_DEFAULT}`);
+          detailLines.push('');
 
-        const steps = [
-          { key: 'id', label: 'Provider ID', value: this.wizard.id, desc: '(e.g., openai-1, gemini-personal)' },
-          { key: 'type', label: 'Provider Type', value: this.wizard.type, desc: '(Use Up/Down keys to change type)' },
-          { key: 'baseUrl', label: 'Base URL', value: this.wizard.baseUrl, desc: '(e.g., https://api.openai.com/v1)' },
-          { key: 'apiKey', label: 'API Key', value: '*'.repeat(this.wizard.apiKey.length), desc: '(hidden for security)' },
-          { key: 'priority', label: 'Priority', value: this.wizard.priority, desc: '(Higher priority checked first)' },
-          { key: 'weight', label: 'Weight', value: this.wizard.weight, desc: '(For load balancing)' }
-        ];
+          if (this.wizard.step === 'oauth_waiting') {
+            detailLines.push(`  ${COLORS.text}Local Redirect URI: ${COLORS.blue}http://localhost:${this.wizard.port}/${DETAIL_DEFAULT}`);
+            detailLines.push(`  ${COLORS.text}Authorize URL (Copy & Open in browser):${DETAIL_DEFAULT}`);
+            const portNum = Number(this.wizard.port) || 52342;
+            const redirectUri = `http://localhost:${portNum}/`;
+            const authUrl = buildGoogleOAuthUrl(this.wizard.clientId, redirectUri);
+            detailLines.push(`  ${COLORS.blue}${BOLD}${authUrl}${DETAIL_DEFAULT}`);
+            detailLines.push('');
+            detailLines.push(`  ${COLORS.green}${BOLD}Status: ${this.wizard.oauthStatus}${DETAIL_DEFAULT}`);
+          } else {
+            const oauthSteps = [
+              { key: 'oauth_id', label: 'Account ID suffix', value: this.wizard.id, desc: "(e.g., 'personal' for id gemini-personal)" },
+              { key: 'oauth_clientId', label: 'Google Client ID', value: this.wizard.clientId, desc: '(Press Enter for default)' },
+              { key: 'oauth_clientSecret', label: 'Google Client Secret', value: '*'.repeat(this.wizard.clientSecret.length), desc: '(Press Enter for default)' },
+              { key: 'oauth_port', label: 'Local Redirect Port', value: this.wizard.port, desc: '(e.g., 52342)' }
+            ];
 
-        for (const s of steps) {
-          const isActive = this.wizard.step === s.key;
-          const prefix = isActive ? `${COLORS.blue}➔ ` : '  ';
-          const labelColor = isActive ? COLORS.green : COLORS.text;
-          const valColor = isActive ? COLORS.green + BOLD : COLORS.text;
-          
-          let line = `${prefix}${labelColor}${s.label}: ${valColor}${s.value || ''}${DETAIL_DEFAULT}`;
-          if (isActive) {
-            line += ` [${COLORS.blue}_${DETAIL_DEFAULT}] ${COLORS.gray}${s.desc}${DETAIL_DEFAULT}`;
+            for (const s of oauthSteps) {
+              const isActive = this.wizard.step === s.key;
+              const prefix = isActive ? `${COLORS.blue}➔ ` : '  ';
+              const labelColor = isActive ? COLORS.green : COLORS.text;
+              const valColor = isActive ? COLORS.green + BOLD : COLORS.text;
+              
+              let line = `${prefix}${labelColor}${s.label}: ${valColor}${s.value || ''}${DETAIL_DEFAULT}`;
+              if (isActive) {
+                line += ` [${COLORS.blue}_${DETAIL_DEFAULT}] ${COLORS.gray}${s.desc}${DETAIL_DEFAULT}`;
+              }
+              detailLines.push(line);
+            }
           }
-          detailLines.push(line);
+        } else {
+          detailLines.push(`${COLORS.blue}${BOLD}➕ Add New API Key Provider${DETAIL_DEFAULT}`);
+          detailLines.push(`${COLORS.gray}Enter configuration values. [Enter] to advance, [Esc] to cancel${DETAIL_DEFAULT}`);
+          detailLines.push('');
+
+          const steps = [
+            { key: 'id', label: 'Provider ID', value: this.wizard.id, desc: '(e.g., openai-1, gemini-personal)' },
+            { key: 'type', label: 'Provider Type', value: this.wizard.type, desc: '(Use Up/Down keys to change type)' },
+            { key: 'baseUrl', label: 'Base URL', value: this.wizard.baseUrl, desc: '(e.g., https://api.openai.com/v1)' },
+            { key: 'apiKey', label: 'API Key', value: '*'.repeat(this.wizard.apiKey.length), desc: '(hidden for security)' },
+            { key: 'priority', label: 'Priority', value: this.wizard.priority, desc: '(Higher priority checked first)' },
+            { key: 'weight', label: 'Weight', value: this.wizard.weight, desc: '(For load balancing)' }
+          ];
+
+          for (const s of steps) {
+            const isActive = this.wizard.step === s.key;
+            const prefix = isActive ? `${COLORS.blue}➔ ` : '  ';
+            const labelColor = isActive ? COLORS.green : COLORS.text;
+            const valColor = isActive ? COLORS.green + BOLD : COLORS.text;
+            
+            let line = `${prefix}${labelColor}${s.label}: ${valColor}${s.value || ''}${DETAIL_DEFAULT}`;
+            if (isActive) {
+              line += ` [${COLORS.blue}_${DETAIL_DEFAULT}] ${COLORS.gray}${s.desc}${DETAIL_DEFAULT}`;
+            }
+            detailLines.push(line);
+          }
         }
       } else {
         detailLines.push(`${COLORS.blue}${BOLD}🔑 Provider Accounts${DETAIL_DEFAULT}`);
-        detailLines.push(`${COLORS.gray}Use Up/Down to navigate, [D] Toggle Active, [Delete] Remove, [A] Add Provider${DETAIL_DEFAULT}`);
+        detailLines.push(`${COLORS.gray}Use Up/Down to navigate, [D] Toggle Active, [Delete] Remove, [A] Add Key, [L] OAuth Login${DETAIL_DEFAULT}`);
         detailLines.push('');
 
         const accounts = this.getUnifiedAccounts();
@@ -653,9 +857,13 @@ export class DashboardTui {
       }
     } else if (this.state.activeTab === 'providers') {
       if (this.wizard.step !== 'none') {
-        footerText = ' ⌨ [Enter]: Next/Save | [Esc]: Cancel | [Backspace]: Backspace';
+        if (this.wizard.step === 'oauth_waiting') {
+          footerText = ' ⌨ [Esc]: Cancel / Exit OAuth setup';
+        } else {
+          footerText = ' ⌨ [Enter]: Next/Save | [Esc]: Cancel | [Backspace]: Backspace';
+        }
       } else {
-        footerText = ' ⌨ Up/Down: Select | [D]: Toggle Active | [Delete]: Remove | [A]: Add | Left/Right: Tabs | [q] Quit';
+        footerText = ' ⌨ Up/Down: Select | [D]: Toggle Active | [Delete]: Remove | [A]: Add Key | [L]: OAuth Login | Left/Right: Tabs | [q] Quit';
       }
     }
     buffer.push(COLORS.blue + formatTuiLine(footerText, cols) + RESET);

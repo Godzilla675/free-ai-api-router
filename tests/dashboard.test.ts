@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
-import { validateDashboardConfig, formatTuiLine, updateSettingField, getSettingField } from '../src/dashboard-helper.js';
+import * as http from 'node:http';
+import { validateDashboardConfig, formatTuiLine, updateSettingField, getSettingField, buildGoogleOAuthUrl } from '../src/dashboard-helper.js';
 
 describe('validateDashboardConfig', () => {
   it('identifies invalid configurations', () => {
@@ -53,8 +54,16 @@ describe('getSettingField', () => {
   it('correctly retrieves nested configuration values', () => {
     const config = { server: { port: 8080 } };
     expect(getSettingField(config, 'server.port')).toBe(8080);
-    expect(getSettingField(config, 'server.host')).toBeUndefined();
-    expect(getSettingField(config, 'nonexistent.field')).toBeUndefined();
+    expect(getSettingField(config, 'server.host')).toBe(undefined);
+    expect(getSettingField(config, 'nonexistent.field')).toBe(undefined);
+  });
+});
+
+describe('buildGoogleOAuthUrl', () => {
+  it('constructs correct google authorization url', () => {
+    const url = buildGoogleOAuthUrl('client-123', 'http://localhost:52342/');
+    expect(url).toContain('client_id=client-123');
+    expect(url).toContain('redirect_uri=http%3A%2F%2Flocalhost%3A52342%2F');
   });
 });
 
@@ -414,6 +423,92 @@ describe('DashboardTui provider management', () => {
     expect(added).toBeDefined();
     expect(added.priority).toBe(0);
     expect(added.weight).toBe(0);
+  });
+
+  it('runs OAuth login wizard and saves record on callback', async () => {
+    const tui = new DashboardTui(tempConfigPath);
+    const state = (tui as any).state;
+    state.activeTab = 'providers';
+
+    // Start OAuth login wizard
+    (tui as any).handleKey('l');
+    expect((tui as any).wizard.step).toBe('oauth_id');
+
+    // Type ID suffix
+    (tui as any).handleKeypress('m', { name: 'm' });
+    (tui as any).handleKeypress('y', { name: 'y' });
+    expect((tui as any).wizard.id).toBe('my');
+
+    // Advance to clientId (keep default)
+    (tui as any).handleKeypress('', { name: 'enter' });
+    expect((tui as any).wizard.step).toBe('oauth_clientId');
+    expect((tui as any).wizard.clientId).toBe('default-google-client-id');
+
+    // Advance to clientSecret (keep default)
+    (tui as any).handleKeypress('', { name: 'enter' });
+    expect((tui as any).wizard.step).toBe('oauth_clientSecret');
+    expect((tui as any).wizard.clientSecret).toBe('default-google-client-secret');
+
+    // Advance to port (keep default)
+    (tui as any).handleKeypress('', { name: 'enter' });
+    expect((tui as any).wizard.step).toBe('oauth_port');
+    expect((tui as any).wizard.port).toBe('52342');
+
+    // Advance to waiting. This starts the callback server.
+    const testPort = 52345;
+    (tui as any).wizard.port = String(testPort);
+    
+    // Mock fetch
+    const originalFetch = globalThis.fetch;
+    const mockFetch = vi.fn().mockImplementation(async (url, options) => {
+      return {
+        ok: true,
+        json: async () => ({
+          access_token: 'fake-access-123',
+          refresh_token: 'fake-refresh-456',
+          expires_in: 3600
+        })
+      } as any;
+    });
+    globalThis.fetch = mockFetch;
+
+    try {
+      (tui as any).handleKeypress('', { name: 'enter' });
+      expect((tui as any).wizard.step).toBe('oauth_waiting');
+
+      // Trigger redirect callback HTTP request to our server
+      const callbackRes = await new Promise<string>((resolve, reject) => {
+        const req = http.request(`http://127.0.0.1:${testPort}/?code=mock-oauth-code-789`, (res) => {
+          let data = '';
+          res.on('data', (chunk) => data += chunk);
+          res.on('end', () => resolve(data));
+        });
+        req.on('error', reject);
+        req.end();
+      });
+
+      expect(callbackRes).toContain('Authentication Successful');
+
+      // Let callback finish async exchange
+      await new Promise<void>((resolve) => setTimeout(resolve, 100));
+
+      expect((tui as any).wizard.step).toBe('none');
+      expect((tui as any).oauthServer).toBeNull();
+
+      const recordPath = join(tempAuthDir, 'gemini-my.json');
+      expect(fs.existsSync(recordPath)).toBe(true);
+
+      const record = JSON.parse(fs.readFileSync(recordPath, 'utf8'));
+      expect(record.id).toBe('gemini-my');
+      expect(record.provider).toBe('gemini-oauth');
+      expect(record.secrets.accessToken).toBe('fake-access-123');
+      expect(record.secrets.refreshToken).toBe('fake-refresh-456');
+    } finally {
+      globalThis.fetch = originalFetch;
+      if ((tui as any).oauthServer) {
+        (tui as any).oauthServer.close();
+      }
+    }
   });
 });
 
