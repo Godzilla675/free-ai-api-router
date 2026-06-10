@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
 import * as http from 'node:http';
-import { validateDashboardConfig, formatTuiLine, updateSettingField, getSettingField, deleteProviderFromConfig, buildGoogleOAuthUrl } from './dashboard-helper.js';
+import { validateDashboardConfig, formatTuiLine, updateSettingField, getSettingField, deleteProviderFromConfig, buildGoogleOAuthUrl, parseRecentLogs } from './dashboard-helper.js';
 
 type Tab = 'overview' | 'providers' | 'settings' | 'logs';
 
@@ -93,6 +93,10 @@ export class DashboardTui {
 
   private authRecords: any[] = [];
   private oauthServer: http.Server | null = null;
+  private isServerOnline = false;
+  private operationsData: any = null;
+  private providersData: any = null;
+  private updateInterval: any = null;
   private wizard = {
     step: 'none' as 'id' | 'type' | 'baseUrl' | 'apiKey' | 'priority' | 'weight' | 'none' | 'oauth_id' | 'oauth_clientId' | 'oauth_clientSecret' | 'oauth_port' | 'oauth_waiting',
     id: '',
@@ -439,6 +443,43 @@ export class DashboardTui {
     }
   }
 
+  private async fetchStats() {
+    const port = this.state.config?.server?.port || 8080;
+    const adminToken = this.state.config?.server?.adminToken || '';
+    const headers: Record<string, string> = {};
+    if (adminToken) {
+      headers['Authorization'] = `Bearer ${adminToken}`;
+    }
+
+    try {
+      const [opsRes, provsRes] = await Promise.all([
+        fetch(`http://localhost:${port}/admin/operations`, { headers }),
+        fetch(`http://localhost:${port}/admin/providers`, { headers })
+      ]);
+
+      if (opsRes.ok && provsRes.ok) {
+        this.operationsData = await opsRes.json();
+        this.providersData = await provsRes.json();
+        this.isServerOnline = true;
+      } else {
+        this.isServerOnline = false;
+      }
+    } catch (err) {
+      this.isServerOnline = false;
+    }
+
+    if (this.state.activeTab === 'overview' || this.state.activeTab === 'logs') {
+      this.render();
+    }
+  }
+
+  private startPeriodicUpdate() {
+    this.fetchStats();
+    this.updateInterval = setInterval(() => {
+      this.fetchStats();
+    }, 1000);
+  }
+
   start() {
     if (process.stdin.setRawMode) {
       process.stdin.setRawMode(true);
@@ -448,6 +489,7 @@ export class DashboardTui {
     process.stdout.write(`${ESC}[?25l`); // Hide cursor
 
     this.render();
+    this.startPeriodicUpdate();
 
     process.stdin.on('keypress', (str, key) => {
       if (key && key.ctrl && key.name === 'c') {
@@ -462,6 +504,10 @@ export class DashboardTui {
   }
 
   private exit() {
+    if (this.updateInterval) {
+      clearInterval(this.updateInterval);
+      this.updateInterval = null;
+    }
     if (process.stdin.setRawMode) {
       process.stdin.setRawMode(false);
     }
@@ -575,11 +621,17 @@ export class DashboardTui {
       this.state.activeTab = TABS[(idx - 1 + TABS.length) % TABS.length]!;
       this.state.selectedIndex = 0;
       this.render();
+      if (this.state.activeTab === 'overview' || this.state.activeTab === 'logs') {
+        this.fetchStats();
+      }
     } else if (keyName === 'right') {
       const idx = TABS.indexOf(this.state.activeTab);
       this.state.activeTab = TABS[(idx + 1) % TABS.length]!;
       this.state.selectedIndex = 0;
       this.render();
+      if (this.state.activeTab === 'overview' || this.state.activeTab === 'logs') {
+        this.fetchStats();
+      }
     } else if (keyName === 'up') {
       if (this.state.activeTab === 'settings') {
         this.state.selectedIndex = Math.max(0, this.state.selectedIndex - 1);
@@ -696,7 +748,10 @@ export class DashboardTui {
 
     // Build frame buffer
     const buffer: string[] = [];
-    buffer.push(COLORS.blue + formatTuiLine(`⚡ FREE AI ROUTER CONTROL PANEL`, cols) + RESET);
+    const statusText = this.isServerOnline
+      ? `${COLORS.green}${BOLD}● ONLINE${RESET}${COLORS.blue}`
+      : `${COLORS.red}${BOLD}○ OFFLINE${RESET}${COLORS.blue}`;
+    buffer.push(COLORS.blue + formatTuiLine(`⚡ FREE AI ROUTER CONTROL PANEL  |  Server: ${statusText}`, cols) + RESET);
 
     // Sidebar vs details split
     const bodyHeight = rows - 3;
@@ -830,9 +885,92 @@ export class DashboardTui {
           }
         }
       }
-    } else {
-      detailLines.push(formatTuiLine(` Active Tab: ${this.state.activeTab.toUpperCase()}`, detailWidth));
-      detailLines.push(formatTuiLine(` Selection Row: ${this.state.selectedIndex}`, detailWidth));
+    } else if (this.state.activeTab === 'overview') {
+      detailLines.push(`${COLORS.blue}${BOLD}⚙ Router Overview${DETAIL_DEFAULT}`);
+      detailLines.push(`${COLORS.gray}Live router status and health metrics${DETAIL_DEFAULT}`);
+      detailLines.push('');
+
+      if (!this.isServerOnline) {
+        detailLines.push(`  Status: ${COLORS.red}${BOLD}Offline${DETAIL_DEFAULT}`);
+        detailLines.push(`  Endpoint: ${COLORS.gray}http://localhost:${this.state.config?.server?.port || 8080}${DETAIL_DEFAULT}`);
+        detailLines.push('');
+        detailLines.push(`  ${COLORS.gray}The router server is currently unreachable.${DETAIL_DEFAULT}`);
+        detailLines.push(`  ${COLORS.gray}Please start it using:${DETAIL_DEFAULT}`);
+        detailLines.push(`    ${COLORS.blue}npm run dev${DETAIL_DEFAULT}  or  ${COLORS.blue}npm run start${DETAIL_DEFAULT}`);
+      } else {
+        const port = this.state.config?.server?.port || 8080;
+        detailLines.push(`  Server Status: ${COLORS.green}${BOLD}● ONLINE${DETAIL_DEFAULT}  |  Port: ${COLORS.blue}${port}${DETAIL_DEFAULT}`);
+        
+        const strategy = this.operationsData?.routing?.strategy || 'priority';
+        const sessionAffinity = this.operationsData?.routing?.sessionAffinity ? 'enabled' : 'disabled';
+        detailLines.push(`  Routing Strategy: ${COLORS.blue}${strategy}${DETAIL_DEFAULT} (session affinity: ${sessionAffinity})`);
+        detailLines.push('');
+
+        detailLines.push(`  ${BOLD}${COLORS.text}Provider Health:${DETAIL_DEFAULT}`);
+        const providers = this.providersData?.providers || [];
+        const health = this.providersData?.health || {};
+        if (providers.length === 0) {
+          detailLines.push(`    ${COLORS.gray}No providers configured.${DETAIL_DEFAULT}`);
+        } else {
+          for (const p of providers) {
+            const h = health[p.id];
+            const cooldown = h?.cooldownUntil || 0;
+            const consecutiveFailures = h?.consecutiveFailures || 0;
+            const isCooldown = cooldown > Date.now();
+            let healthStr = `${COLORS.green}● Healthy${DETAIL_DEFAULT}`;
+            if (isCooldown) {
+              const remaining = Math.ceil((cooldown - Date.now()) / 1000);
+              healthStr = `${COLORS.red}○ Cooldown (${remaining}s remaining)${DETAIL_DEFAULT}`;
+            } else if (consecutiveFailures > 0) {
+              healthStr = `${COLORS.gray}● Failures (${consecutiveFailures})${DETAIL_DEFAULT}`;
+            }
+            detailLines.push(`    - ${COLORS.blue}${p.id.padEnd(20)}${DETAIL_DEFAULT}: ${healthStr}`);
+          }
+        }
+        detailLines.push('');
+
+        const usage = this.operationsData?.usage || [];
+        detailLines.push(`  ${BOLD}${COLORS.text}Traffic Statistics (last ${usage.length} requests):${DETAIL_DEFAULT}`);
+        if (usage.length === 0) {
+          detailLines.push(`    ${COLORS.gray}No traffic recorded yet.${DETAIL_DEFAULT}`);
+        } else {
+          const total = usage.length;
+          const errors = usage.filter((u: any) => u.status === 'error').length;
+          const avgLatency = Math.round(usage.reduce((sum: number, u: any) => sum + (u.latencyMs || 0), 0) / total);
+          const errorRate = Math.round((errors / total) * 100);
+
+          detailLines.push(`    - Total Requests: ${COLORS.blue}${total}${DETAIL_DEFAULT}`);
+          detailLines.push(`    - Success Rate  : ${errorRate > 0 ? COLORS.red : COLORS.green}${100 - errorRate}%${DETAIL_DEFAULT}`);
+          detailLines.push(`    - Avg Latency   : ${COLORS.blue}${avgLatency}ms${DETAIL_DEFAULT}`);
+        }
+      }
+    } else if (this.state.activeTab === 'logs') {
+      detailLines.push(`${COLORS.blue}${BOLD}📋 Operations Logs${DETAIL_DEFAULT}`);
+      detailLines.push(`${COLORS.gray}Real-time operations log from the API router${DETAIL_DEFAULT}`);
+      detailLines.push('');
+
+      if (!this.isServerOnline) {
+        detailLines.push(`  Status: ${COLORS.red}${BOLD}Offline${DETAIL_DEFAULT}`);
+        detailLines.push('');
+        detailLines.push(`  ${COLORS.gray}Logs are only available when the server is online.${DETAIL_DEFAULT}`);
+      } else {
+        const logs = parseRecentLogs(this.operationsData || {});
+        if (logs.length === 0) {
+          detailLines.push(`  ${COLORS.gray}No logs recorded yet. Send requests to the router to see them live.${DETAIL_DEFAULT}`);
+        } else {
+          const maxLogs = bodyHeight - 4;
+          const visibleLogs = logs.slice(0, maxLogs);
+          for (const logLine of visibleLogs) {
+            let coloredLine = logLine;
+            if (coloredLine.includes('success')) {
+              coloredLine = coloredLine.replace('success', `${COLORS.green}success${COLORS.text}`);
+            } else if (coloredLine.includes('error')) {
+              coloredLine = coloredLine.replace('error', `${COLORS.red}error${COLORS.text}`);
+            }
+            detailLines.push(`  ${coloredLine}`);
+          }
+        }
+      }
     }
 
     for (let r = 0; r < bodyHeight; r++) {

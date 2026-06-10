@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
 import * as http from 'node:http';
-import { validateDashboardConfig, formatTuiLine, updateSettingField, getSettingField, buildGoogleOAuthUrl } from '../src/dashboard-helper.js';
+import { validateDashboardConfig, formatTuiLine, updateSettingField, getSettingField, buildGoogleOAuthUrl, parseRecentLogs } from '../src/dashboard-helper.js';
 
 describe('validateDashboardConfig', () => {
   it('identifies invalid configurations', () => {
@@ -511,6 +511,82 @@ describe('DashboardTui provider management', () => {
     }
   });
 });
+
+describe('parseRecentLogs', () => {
+  it('formats operations logs data', () => {
+    const rawData = { usage: [{ timestamp: '2026-06-10T12:00:00Z', status: 'success', latencyMs: 55 }] };
+    const formatted = parseRecentLogs(rawData);
+    expect(formatted[0]).toContain('success');
+    expect(formatted[0]).toContain('55ms');
+  });
+});
+
+describe('DashboardTui operations and stats update', () => {
+  const tempConfigPath = 'temp-config-ops-test.json';
+
+  beforeEach(() => {
+    fs.writeFileSync(tempConfigPath, JSON.stringify({ server: { port: 8080 } }), 'utf8');
+  });
+
+  afterEach(() => {
+    if (fs.existsSync(tempConfigPath)) {
+      fs.unlinkSync(tempConfigPath);
+    }
+  });
+
+  it('periodic updates fetch operations stats and marks online/offline status', async () => {
+    const tui = new DashboardTui(tempConfigPath);
+    expect((tui as any).isServerOnline).toBe(false);
+
+    (tui as any).state.config = {
+      server: {
+        port: 52349,
+        adminToken: 'test-admin-token'
+      }
+    };
+
+    // Mock response from operations and providers
+    const originalFetch = globalThis.fetch;
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/admin/operations')) {
+        return {
+          ok: true,
+          json: async () => ({
+            routing: { strategy: 'priority' },
+            health: {},
+            usage: [{ timestamp: '2026-06-10T12:00:00Z', status: 'success', latencyMs: 55 }]
+          })
+        } as any;
+      }
+      if (url.includes('/admin/providers')) {
+        return {
+          ok: true,
+          json: async () => ({
+            providers: [{ id: 'groq', type: 'openai-compatible' }],
+            health: {}
+          })
+        } as any;
+      }
+      return { ok: false } as any;
+    });
+    globalThis.fetch = mockFetch;
+
+    try {
+      await (tui as any).fetchStats();
+      expect((tui as any).isServerOnline).toBe(true);
+      expect((tui as any).operationsData.routing.strategy).toBe('priority');
+      expect((tui as any).providersData.providers[0].id).toBe('groq');
+
+      // Test offline fallback
+      mockFetch.mockRejectedValueOnce(new Error('Connection refused'));
+      await (tui as any).fetchStats();
+      expect((tui as any).isServerOnline).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
 
 
 

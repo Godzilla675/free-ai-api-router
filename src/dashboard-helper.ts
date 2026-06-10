@@ -62,3 +62,14 @@ export function buildGoogleOAuthUrl(clientId: string, redirectUri: string): stri
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 }
+
+export function parseRecentLogs(data: any): string[] {
+  return (data.usage ?? []).map((log: any) => {
+    const time = log.timestamp ? log.timestamp.split('T')[1]?.slice(0, 8) || log.timestamp : 'unknown';
+    const statusStr = log.status === 'success' ? 'success' : 'error';
+    const errStr = log.error ? ` - Error: ${log.error}` : '';
+    const routeInfo = log.modelGroup ? ` [${log.modelGroup} -> ${log.providerId || log.deploymentId || 'unknown'}]` : '';
+    return `[${time}]${routeInfo} ${statusStr} (${log.latencyMs}ms)${errStr}`;
+  });
+}
+
