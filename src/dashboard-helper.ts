@@ -13,3 +13,31 @@ export function formatTuiLine(text: string, width: number): string {
   return text + ' '.repeat(padding);
 }
 
+export function updateSettingField(config: any, path: string, value: any): void {
+  const parts = path.split('.');
+  let current = config;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const part = parts[i]!;
+    if (!(part in current)) {
+      current[part] = {};
+    }
+    current = current[part];
+  }
+  const lastKey = parts[parts.length - 1]!;
+  current[lastKey] = value;
+}
+
+export function getSettingField(config: any, path: string): any {
+  const parts = path.split('.');
+  let current = config;
+  for (const part of parts) {
+    if (current === null || current === undefined || typeof current !== 'object') {
+      return undefined;
+    }
+    current = current[part];
+  }
+  return current;
+}
+
+
+

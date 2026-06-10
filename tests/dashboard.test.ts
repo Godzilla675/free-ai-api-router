@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateDashboardConfig, formatTuiLine } from '../src/dashboard-helper.js';
+import { validateDashboardConfig, formatTuiLine, updateSettingField, getSettingField } from '../src/dashboard-helper.js';
 
 describe('validateDashboardConfig', () => {
   it('identifies invalid configurations', () => {
@@ -27,5 +27,24 @@ describe('formatTuiLine', () => {
     expect(stripped).toBe('Hello               ');
   });
 });
+
+describe('updateSettingField', () => {
+  it('correctly updates nested configuration values', () => {
+    const config = { server: { port: 8080 } };
+    updateSettingField(config, 'server.port', 9090);
+    expect(config.server.port).toBe(9090);
+  });
+});
+
+describe('getSettingField', () => {
+  it('correctly retrieves nested configuration values', () => {
+    const config = { server: { port: 8080 } };
+    expect(getSettingField(config, 'server.port')).toBe(8080);
+    expect(getSettingField(config, 'server.host')).toBeUndefined();
+    expect(getSettingField(config, 'nonexistent.field')).toBeUndefined();
+  });
+});
+
+
 
 
