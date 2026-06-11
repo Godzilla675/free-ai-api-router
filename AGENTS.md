@@ -39,7 +39,7 @@ Common development commands:
 ```powershell
 npm run dev       # tsx src/index.ts --config config.example.json
 npm run build     # clean dist and compile production output
-npm run start     # node dist/index.js --config config.json
+npm run start     # node dist/cli.js start --config config.json
 npm test          # vitest run
 npm run lint      # alias for typecheck
 ```

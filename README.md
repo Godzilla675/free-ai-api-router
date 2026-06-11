@@ -25,7 +25,7 @@ npm install
 cp config.example.json config.json
 cp .env.example .env
 npm run build
-node --env-file=.env dist/index.js --config config.json
+node --env-file=.env dist/cli.js start --config config.json
 ```
 
 Node reads provider keys from the real environment. On PowerShell you can set them for the current session like this:
