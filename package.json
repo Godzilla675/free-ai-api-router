@@ -13,14 +13,14 @@
     "url": "https://github.com/Godzilla675/free-ai-api-router/issues"
   },
   "bin": {
-    "free-ai-router": "dist/index.js"
+    "free-ai-router": "dist/cli.js"
   },
   "scripts": {
     "clean": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\"",
     "build": "npm run clean && tsc -p tsconfig.build.json",
     "dev": "tsx src/index.ts --config config.example.json",
-    "dashboard": "tsx src/dashboard.ts --config config.json",
-    "start": "node dist/index.js --config config.json",
+    "dashboard": "tsx src/cli.ts dashboard --config config.json",
+    "start": "node dist/cli.js start --config config.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
