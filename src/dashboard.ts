@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as readline from 'node:readline';
 import * as http from 'node:http';
 import { validateDashboardConfig, formatTuiLine, updateSettingField, getSettingField, deleteProviderFromConfig, buildGoogleOAuthUrl, parseRecentLogs } from './dashboard-helper.js';
@@ -1012,11 +1013,18 @@ export class DashboardTui {
 
 }
 
-// Start CLI if directly run
-if (process.argv[1]?.endsWith('dashboard.ts') || process.argv[1]?.endsWith('dashboard.js')) {
+export function startDashboard(configPath?: string): void {
+  const tui = new DashboardTui(configPath ?? 'config.json');
+  tui.start();
+}
+
+// (Note: path is already imported as * from 'node:path')
+const entryPath = process.argv[1] ? path.resolve(process.argv[1]).toLowerCase() : '';
+const modulePath = path.resolve(fileURLToPath(import.meta.url)).toLowerCase();
+
+if (entryPath === modulePath) {
   const args = process.argv.slice(2);
   const configIdx = args.indexOf('--config');
   const configPath = configIdx !== -1 ? args[configIdx + 1] ?? 'config.json' : 'config.json';
-  const tui = new DashboardTui(configPath);
-  tui.start();
+  startDashboard(configPath);
 }
