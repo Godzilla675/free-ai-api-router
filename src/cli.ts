@@ -33,13 +33,23 @@ ${BOLD}Examples:${RESET}
 `);
 }
 
+
 async function runCli(): Promise<void> {
   const args = process.argv.slice(2);
   const subcommand = args[0];
 
+  const validCommands = ['start', 'dashboard', 'help', '--help', '-h', undefined];
+  if (subcommand && !validCommands.includes(subcommand) && !subcommand.startsWith('-')) {
+    console.error(`Error: Unknown command "${subcommand}"`);
+    showHelp();
+    process.exit(1);
+    return;
+  }
+
   if (subcommand === 'help' || subcommand === '--help' || subcommand === '-h') {
     showHelp();
     process.exit(0);
+    return;
   }
 
   if (subcommand === 'dashboard') {

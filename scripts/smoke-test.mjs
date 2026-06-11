@@ -37,7 +37,7 @@ await writeFile(configPath, JSON.stringify({
   models: []
 }, null, 2));
 
-const child = spawn(process.execPath, [join(root, 'dist', 'index.js'), '--config', configPath], {
+const child = spawn(process.execPath, [join(root, 'dist', 'cli.js'), 'start', '--config', configPath], {
   cwd: root,
   stdio: ['ignore', 'pipe', 'pipe']
 });
