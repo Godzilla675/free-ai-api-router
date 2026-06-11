@@ -28,6 +28,19 @@ describe('formatTuiLine', () => {
     expect(stripped.length).toBe(20);
     expect(stripped).toBe('Hello               ');
   });
+
+  it('truncates plain text lines longer than width', () => {
+    const output = formatTuiLine('Hello World', 5);
+    expect(output).toBe('Hello\x1b[0m');
+  });
+
+  it('truncates lines with ANSI escape sequences and appends reset code', () => {
+    const greenText = '\x1b[32mHello World\x1b[0m';
+    const output = formatTuiLine(greenText, 5);
+    // Visual length: 5 (Hello)
+    // The escape code \x1b[32m should be preserved, and \x1b[0m appended at the end
+    expect(output).toBe('\x1b[32mHello\x1b[0m');
+  });
 });
 
 describe('updateSettingField', () => {

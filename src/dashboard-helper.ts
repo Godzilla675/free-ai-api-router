@@ -7,10 +7,43 @@ export function validateDashboardConfig(config: RouterConfig): void {
 }
 
 export function formatTuiLine(text: string, width: number): string {
-  // Strip ANSI codes to calculate actual character width
-  const stripped = text.replace(/\x1b\[[0-9;]*m/g, '');
-  const padding = Math.max(0, width - stripped.length);
-  return text + ' '.repeat(padding);
+  let visibleCount = 0;
+  let result = '';
+  let i = 0;
+  let truncated = false;
+  
+  while (i < text.length) {
+    if (text[i] === '\x1b') {
+      let j = i + 1;
+      if (text[j] === '[') {
+        j++;
+        while (j < text.length && !/[a-zA-Z]/.test(text[j]!)) {
+          j++;
+        }
+        if (j < text.length) {
+          j++;
+        }
+      }
+      result += text.slice(i, j);
+      i = j;
+    } else {
+      if (visibleCount < width) {
+        result += text[i];
+        visibleCount++;
+        i++;
+      } else {
+        truncated = true;
+        break;
+      }
+    }
+  }
+
+  if (visibleCount < width) {
+    result += ' '.repeat(width - visibleCount);
+  } else if (truncated) {
+    result += '\x1b[0m';
+  }
+  return result;
 }
 
 export function updateSettingField(config: any, path: string, value: any): void {
