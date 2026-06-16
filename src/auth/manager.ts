@@ -1,3 +1,4 @@
+import { logger } from '../logger.js';
 import { AuthStore } from './store.js';
 import type { AuthRecord, RedactedAuthRecord } from './types.js';
 import { redactAuthRecord } from './types.js';
@@ -63,13 +64,23 @@ export class AuthManager {
   }
 
   async refreshDue(now = new Date()): Promise<void> {
+    const promises: Promise<void>[] = [];
     for (const record of this.records.values()) {
       if (record.disabled) continue;
       if (record.status !== 'expired' && (!record.nextRefreshAfter || Date.parse(record.nextRefreshAfter) > now.getTime())) continue;
       const handler = this.handlers.get(record.provider);
       if (!handler?.refresh) continue;
-      const refreshed = await handler.refresh(record);
-      await this.upsert(refreshed);
+
+      const p = handler.refresh(record)
+        .then(refreshed => this.upsert(refreshed));
+      promises.push(p);
+    }
+
+    const results = await Promise.allSettled(promises);
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        logger.error('Failed to refresh auth record', result.reason);
+      }
     }
   }
 }
