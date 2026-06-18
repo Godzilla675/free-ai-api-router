@@ -116,4 +116,14 @@ describe('AuthManager', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('throws an error when setting disabled status for a non-existent record', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'free-ai-router-auth-'));
+    try {
+      const manager = await AuthManager.create({ authDir: dir });
+      await expect(manager.setDisabled('non-existent', true)).rejects.toThrow('Auth record not found: non-existent');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
